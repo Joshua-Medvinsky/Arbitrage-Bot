@@ -37,6 +37,10 @@ async def get_uniswap_price():
         """
     }
 
+    if not UNISWAP_V3_SUBGRAPH:
+        print("UNISWAP_V3_SUBGRAPH not configured")
+        return None
+
     async with aiohttp.ClientSession() as session:
         headers = {
             "Authorization": f"Bearer {UNISWAP_API_KEY}",
@@ -136,6 +140,11 @@ async def get_aerodrome_pairs():
         }
         """
     }
+    
+    if not AERODROME_SUBGRAPH:
+        print("AERODROME_SUBGRAPH not configured")
+        return
+        
     async with aiohttp.ClientSession() as session:
         async with session.post(AERODROME_SUBGRAPH, json=query) as resp:
             result = await resp.json()
