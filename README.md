@@ -15,7 +15,7 @@ This bot is currently **in progress**. The current version focuses on simulation
 
 ## Roadmap
 - [x] Simulate arbitrage opportunities between two or more DEX pools
-- [ ] Add a simulation mode (current default)
+- [x] Add a simulation mode (current default)
 - [ ] Add a live mode to execute real trades on-chain (coming soon)
 - [ ] Improve error handling and logging
 - [ ] Add configuration options for tokens, pools, and strategies
