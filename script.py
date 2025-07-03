@@ -3,6 +3,7 @@ import os
 import aiohttp
 from web3 import Web3
 from dotenv import load_dotenv
+from config import PAIR_ABI, SUSHI_FACTORY_ABI, DEFAULT_ETH_AMOUNT, DEFAULT_GAS_ETH, DEFAULT_SLIPPAGE_PCT, USDC_ADDRESS, WETH_ADDRESS, SUSHI_PAIR_ADDRESS, ZORA_ADDRESS, SUSHI_FACTORY_ADDRESS
 
 load_dotenv()
 
@@ -13,42 +14,11 @@ UNISWAP_API_KEY = os.getenv("UNISWAP_API_KEY")
 
 w3 = Web3(Web3.HTTPProvider(WEB3_PROVIDER))
 
-# Addresses
-USDC = Web3.to_checksum_address(os.getenv("USDC_ADDRESS"))
-WETH = Web3.to_checksum_address(os.getenv("WETH_ADDRESS"))
-SUSHI_PAIR = Web3.to_checksum_address(os.getenv("SUSHI_PAIR_ADDRESS"))
-ZORA = os.getenv("ZORA_ADDRESS")
-SUSHI_FACTORY = Web3.to_checksum_address(os.getenv("SUSHI_FACTORY_ADDRESS"))
-
-# SushiSwap Pair ABI fragment   
-PAIR_ABI = [{
-    "constant": True,
-    "inputs": [],
-    "name": "getReserves",
-    "outputs": [
-        {"name": "_reserve0", "type": "uint112"},
-        {"name": "_reserve1", "type": "uint112"},
-        {"name": "_blockTimestampLast", "type": "uint32"}
-    ],
-    "type": "function"
-}, {
-    "constant": True,
-    "inputs": [],
-    "name": "token0",
-    "outputs": [{"name": "", "type": "address"}],
-    "type": "function"
-}, {
-    "constant": True,
-    "inputs": [],
-    "name": "token1",
-    "outputs": [{"name": "", "type": "address"}],
-    "type": "function"
-}]
-
-SUSHI_FACTORY_ABI = [
-    {"constant":True,"inputs":[],"name":"allPairsLength","outputs":[{"name":"","type":"uint256"}],"type":"function"},
-    {"constant":True,"inputs":[{"name":"","type":"uint256"}],"name":"allPairs","outputs":[{"name":"","type":"address"}],"type":"function"}
-]
+USDC = Web3.to_checksum_address(USDC_ADDRESS)
+WETH = Web3.to_checksum_address(WETH_ADDRESS)
+SUSHI_PAIR = Web3.to_checksum_address(SUSHI_PAIR_ADDRESS)
+ZORA = ZORA_ADDRESS
+SUSHI_FACTORY = Web3.to_checksum_address(SUSHI_FACTORY_ADDRESS)
 
 async def get_uniswap_price():
     query = {
@@ -66,9 +36,6 @@ async def get_uniswap_price():
         }
         """
     }
-
-    USDC = "0xd9aa30e1b4c60cae79fc379ff651abace84f5aa9"
-    WETH = "0x4200000000000000000000000000000000000006"
 
     async with aiohttp.ClientSession() as session:
         headers = {
@@ -125,7 +92,7 @@ def get_sushiswap_pairs():
             symbols.append("?")
     print(f"SushiSwap pair: {symbols[0]}/{symbols[1]} ({token0}/{token1})")
 
-def estimate_profit(buy_price, sell_price, eth_amount=1.0, gas_eth=0.002, slippage_pct=0.005):
+def estimate_profit(buy_price, sell_price, eth_amount=DEFAULT_ETH_AMOUNT, gas_eth=DEFAULT_GAS_ETH, slippage_pct=DEFAULT_SLIPPAGE_PCT):
     gross_profit = (sell_price - buy_price) * eth_amount
     slippage_loss = slippage_pct * (buy_price + sell_price) / 2 * eth_amount
     gas_cost_usd = gas_eth * sell_price
@@ -136,7 +103,7 @@ async def monitor():
     while True:
         uni_price = await get_uniswap_price()
         sushi_price = get_sushiswap_price()
-        eth_amount = 1.0  # Simulate with 1 ETH
+        eth_amount = DEFAULT_ETH_AMOUNT  # Simulate with 1 ETH
 
         if uni_price and sushi_price:
             print(f"[Uniswap] {uni_price:.2f} | [SushiSwap] {sushi_price:.2f}")
