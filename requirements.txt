@@ -1,0 +1,4 @@
+aiohttp==3.9.1
+web3==6.15.1
+python-dotenv==1.0.0
+asyncio 
