@@ -27,51 +27,80 @@ async def get_uniswap_prices():
     query = {
         "query": """
         {
-          liquidityPools(first: 1000) {
+          pools(first: 1000) {
             id
-            inputTokens {
+            token0 {
               id
               symbol
             }
-            inputTokenBalances
+            token1 {
+              id
+              symbol
+            }
+            token0Price
+            token1Price
             totalValueLockedUSD
           }
         }
         """
     }
 
-    async with aiohttp.ClientSession() as session:
-        headers = {
-            "Authorization": f"Bearer {UNISWAP_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        async with session.post(UNISWAP_V3_SUBGRAPH, json=query, headers=headers) as resp:
-            result = await resp.json()
-            pools = result.get("data", {}).get("liquidityPools", [])
-            
-            prices = {}
-            for pool in pools:
-                tokens = pool["inputTokens"]
-                balances = pool["inputTokenBalances"]
-                tvl = float(pool.get("totalValueLockedUSD", 0))
+    try:
+        async with aiohttp.ClientSession() as session:
+            headers = {
+                "Authorization": f"Bearer {UNISWAP_API_KEY}" if UNISWAP_API_KEY else "",
+                "Content-Type": "application/json"
+            }
+            async with session.post(UNISWAP_V3_SUBGRAPH, json=query, headers=headers) as resp:
+                result = await resp.json()
                 
-                if len(tokens) == 2 and len(balances) == 2 and tvl > 1000:  # Only pools with >$1k TVL
-                    token0, token1 = tokens[0], tokens[1]
-                    balance0, balance1 = float(balances[0]), float(balances[1])
-                    
-                    if balance0 > 0 and balance1 > 0:
-                        # Calculate price (assuming token0 is base)
-                        price = balance1 / balance0
-                        pair_key = f"{token0['symbol']}/{token1['symbol']}"
-                        prices[pair_key] = {
-                            'price': price,
-                            'tvl': tvl,
-                            'pool_id': pool['id'],
-                            'token0': token0['id'],
-                            'token1': token1['id']
-                        }
-            
-            return prices
+                # Debug: Print the response to see what we're getting
+                print(f"Uniswap subgraph response status: {resp.status}")
+                if resp.status != 200:
+                    print(f"Uniswap subgraph error: {result}")
+                    return {}
+                
+                if result is None:
+                    print("Uniswap subgraph returned None")
+                    return {}
+                
+                # Debug: Print the actual response structure
+                print(f"Uniswap response keys: {result.keys() if result else 'None'}")
+                if 'data' in result:
+                    print(f"Uniswap data keys: {result['data'].keys() if result['data'] else 'None'}")
+                if 'errors' in result:
+                    print(f"Uniswap errors: {result['errors']}")
+                
+                pools = result.get("data", {}).get("pools", [])
+                print(f"Found {len(pools)} Uniswap pools")
+                
+                prices = {}
+                processed_count = 0
+                for pool in pools:
+                    try:
+                        tokens = pool["token0"], pool["token1"]
+                        price = float(pool.get('token0Price', 0))
+                        tvl = float(pool.get("totalValueLockedUSD", 0))
+                        
+                        if price > 0 and tvl > 1000:  # Only pools with >$1k TVL
+                            pair_key = f"{tokens[0]['symbol']}/{tokens[1]['symbol']}"
+                            prices[pair_key] = {
+                                'price': price,
+                                'tvl': tvl,
+                                'pool_id': pool['id'],
+                                'token0': tokens[0]['id'],
+                                'token1': tokens[1]['id']
+                            }
+                            processed_count += 1
+                    except Exception as e:
+                        continue
+                
+                print(f"Processed {processed_count} Uniswap pools with valid prices")
+                return prices
+                
+    except Exception as e:
+        print(f"Error fetching Uniswap prices: {e}")
+        return {}
 
 async def get_sushiswap_prices():
     """Get all SushiSwap pool prices"""
@@ -83,6 +112,7 @@ async def get_sushiswap_prices():
     prices = {}
     
     try:
+        # Test if factory is accessible
         total_pairs = factory.functions.allPairsLength().call()
         print(f"Scanning {min(100, total_pairs)} SushiSwap pairs...")
         
@@ -122,7 +152,9 @@ async def get_sushiswap_prices():
                 continue  # Skip problematic pairs
                 
     except Exception as e:
-        print(f"Error fetching SushiSwap pairs: {e}")
+        print(f"SushiSwap factory not accessible: {e}")
+        print("This might mean the factory address is wrong for Base network")
+        return {}
     
     return prices
 
@@ -135,7 +167,7 @@ async def get_aerodrome_prices():
     query = {
         "query": """
         {
-          pairs(first: 200) {
+          pools(first: 200) {
             id
             token0 { id symbol }
             token1 { id symbol }
@@ -147,33 +179,57 @@ async def get_aerodrome_prices():
         """
     }
     
-    async with aiohttp.ClientSession() as session:
-        async with session.post(AERODROME_SUBGRAPH, json=query) as resp:
-            result = await resp.json()
-            pairs = result.get("data", {}).get("pairs", [])
-            
-            prices = {}
-            for pair in pairs:
-                try:
-                    reserve0 = float(pair.get("reserve0", 0))
-                    reserve1 = float(pair.get("reserve1", 0))
-                    
-                    if reserve0 > 0 and reserve1 > 0:
-                        price = reserve1 / reserve0
-                        t0 = pair["token0"]
-                        t1 = pair["token1"]
-                        pair_key = f"{t0['symbol']}/{t1['symbol']}"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(AERODROME_SUBGRAPH, json=query) as resp:
+                result = await resp.json()
+                
+                # Debug: Print the response to see what we're getting
+                print(f"Aerodrome subgraph response status: {resp.status}")
+                if resp.status != 200:
+                    print(f"Aerodrome subgraph error: {result}")
+                    return {}
+                
+                if result is None:
+                    print("Aerodrome subgraph returned None")
+                    return {}
+                
+                # Debug: Print the actual response structure
+                print(f"Aerodrome response keys: {result.keys() if result else 'None'}")
+                if 'data' in result:
+                    print(f"Aerodrome data keys: {result['data'].keys() if result['data'] else 'None'}")
+                if 'errors' in result:
+                    print(f"Aerodrome errors: {result['errors']}")
+                
+                pairs = result.get("data", {}).get("pools", [])
+                print(f"Found {len(pairs)} Aerodrome pools")
+                
+                prices = {}
+                for pair in pairs:
+                    try:
+                        reserve0 = float(pair.get("reserve0", 0))
+                        reserve1 = float(pair.get("reserve1", 0))
                         
-                        prices[pair_key] = {
-                            'price': price,
-                            'pool_id': pair['id'],
-                            'token0': t0['id'],
-                            'token1': t1['id']
-                        }
-                except Exception:
-                    continue
-            
-            return prices
+                        if reserve0 > 0 and reserve1 > 0:
+                            price = reserve1 / reserve0
+                            t0 = pair["token0"]
+                            t1 = pair["token1"]
+                            pair_key = f"{t0['symbol']}/{t1['symbol']}"
+                            
+                            prices[pair_key] = {
+                                'price': price,
+                                'pool_id': pair['id'],
+                                'token0': t0['id'],
+                                'token1': t1['id']
+                            }
+                    except Exception:
+                        continue
+                
+                return prices
+                
+    except Exception as e:
+        print(f"Error fetching Aerodrome prices: {e}")
+        return {}
 
 def find_arbitrage_opportunities(uniswap_prices, sushiswap_prices, aerodrome_prices):
     """Find arbitrage opportunities across all DEXes"""
