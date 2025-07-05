@@ -3,7 +3,7 @@ import os
 import aiohttp
 from web3 import Web3
 from dotenv import load_dotenv
-from config import PAIR_ABI, SUSHI_FACTORY_ABI, DEFAULT_ETH_AMOUNT, DEFAULT_GAS_ETH, DEFAULT_SLIPPAGE_PCT, USDC_ADDRESS, WETH_ADDRESS, SUSHI_PAIR_ADDRESS, ZORA_ADDRESS, SUSHI_FACTORY_ADDRESS
+from config import PAIR_ABI, SUSHI_FACTORY_ABI, DEFAULT_ETH_AMOUNT, DEFAULT_GAS_ETH, DEFAULT_SLIPPAGE_PCT, USDC_ADDRESS, WETH_ADDRESS, ZORA_ADDRESS, SUSHI_FACTORY_ADDRESS
 
 load_dotenv()
 
@@ -14,32 +14,31 @@ UNISWAP_API_KEY = os.getenv("UNISWAP_API_KEY")
 
 w3 = Web3(Web3.HTTPProvider(WEB3_PROVIDER))
 
+# Convert addresses to checksum format
 USDC = Web3.to_checksum_address(USDC_ADDRESS)
 WETH = Web3.to_checksum_address(WETH_ADDRESS)
-SUSHI_PAIR = Web3.to_checksum_address(SUSHI_PAIR_ADDRESS)
-ZORA = ZORA_ADDRESS
-SUSHI_FACTORY = Web3.to_checksum_address(SUSHI_FACTORY_ADDRESS)
 
-async def get_uniswap_price():
+async def get_uniswap_prices():
+    """Get all Uniswap v3 pool prices"""
+    if not UNISWAP_V3_SUBGRAPH:
+        print("UNISWAP_V3_SUBGRAPH not configured")
+        return {}
+    
     query = {
         "query": """
         {
-          liquidityPools(first: 500) {
+          liquidityPools(first: 1000) {
             id
-            name
             inputTokens {
               id
               symbol
             }
             inputTokenBalances
+            totalValueLockedUSD
           }
         }
         """
     }
-
-    if not UNISWAP_V3_SUBGRAPH:
-        print("UNISWAP_V3_SUBGRAPH not configured")
-        return None
 
     async with aiohttp.ClientSession() as session:
         headers = {
@@ -49,52 +48,179 @@ async def get_uniswap_price():
         async with session.post(UNISWAP_V3_SUBGRAPH, json=query, headers=headers) as resp:
             result = await resp.json()
             pools = result.get("data", {}).get("liquidityPools", [])
-            weth_pairs = set()
+            
+            prices = {}
             for pool in pools:
                 tokens = pool["inputTokens"]
-                token_addresses = [t["id"].lower() for t in tokens]
-                symbols = [t["symbol"] for t in tokens]
-                if WETH in token_addresses:
-                    for t in tokens:
-                        if t["id"].lower() != WETH:
-                            weth_pairs.add((t["symbol"], t["id"]))
-            print("Uniswap v3 WETH pairs:")
-            for symbol, addr in weth_pairs:
-                print(f"{symbol}: {addr}")
-            get_sushiswap_pairs()
-            await get_aerodrome_pairs()
-            await get_all_sushiswap_pairs()
-            return None
+                balances = pool["inputTokenBalances"]
+                tvl = float(pool.get("totalValueLockedUSD", 0))
+                
+                if len(tokens) == 2 and len(balances) == 2 and tvl > 1000:  # Only pools with >$1k TVL
+                    token0, token1 = tokens[0], tokens[1]
+                    balance0, balance1 = float(balances[0]), float(balances[1])
+                    
+                    if balance0 > 0 and balance1 > 0:
+                        # Calculate price (assuming token0 is base)
+                        price = balance1 / balance0
+                        pair_key = f"{token0['symbol']}/{token1['symbol']}"
+                        prices[pair_key] = {
+                            'price': price,
+                            'tvl': tvl,
+                            'pool_id': pool['id'],
+                            'token0': token0['id'],
+                            'token1': token1['id']
+                        }
+            
+            return prices
 
-def get_sushiswap_price():
-    pair = w3.eth.contract(address=SUSHI_PAIR, abi=PAIR_ABI)
-    reserves = pair.functions.getReserves().call()
-    token0 = pair.functions.token0().call()
+async def get_sushiswap_prices():
+    """Get all SushiSwap pool prices"""
+    if not SUSHI_FACTORY_ADDRESS:
+        print("SUSHI_FACTORY_ADDRESS not configured")
+        return {}
     
-    if token0.lower() == WETH.lower():
-        eth_reserve = reserves[0] / 1e18
-        usdc_reserve = reserves[1] / 1e6
-    else:
-        eth_reserve = reserves[1] / 1e18
-        usdc_reserve = reserves[0] / 1e6
+    factory = w3.eth.contract(address=Web3.to_checksum_address(SUSHI_FACTORY_ADDRESS), abi=SUSHI_FACTORY_ABI)
+    prices = {}
+    
+    try:
+        total_pairs = factory.functions.allPairsLength().call()
+        print(f"Scanning {min(100, total_pairs)} SushiSwap pairs...")
+        
+        for i in range(min(100, total_pairs)):  # Limit to first 100 pairs
+            try:
+                pair_addr = factory.functions.allPairs(i).call()
+                pair = w3.eth.contract(address=pair_addr, abi=PAIR_ABI)
+                
+                reserves = pair.functions.getReserves().call()
+                token0 = pair.functions.token0().call()
+                token1 = pair.functions.token1().call()
+                
+                if reserves[0] > 0 and reserves[1] > 0:
+                    # Get token symbols
+                    symbols = []
+                    for token in [token0, token1]:
+                        try:
+                            erc20 = w3.eth.contract(address=token, abi=[{"constant":True,"inputs":[],"name":"symbol","outputs":[{"name":"","type":"string"}],"type":"function"}])
+                            symbol = erc20.functions.symbol().call()
+                            symbols.append(symbol)
+                        except Exception:
+                            symbols.append("?")
+                    
+                    # Calculate price
+                    price = reserves[1] / reserves[0] if reserves[0] > 0 else 0
+                    pair_key = f"{symbols[0]}/{symbols[1]}"
+                    
+                    if price > 0:
+                        prices[pair_key] = {
+                            'price': price,
+                            'pair_address': pair_addr,
+                            'token0': token0,
+                            'token1': token1
+                        }
+                        
+            except Exception as e:
+                continue  # Skip problematic pairs
+                
+    except Exception as e:
+        print(f"Error fetching SushiSwap pairs: {e}")
+    
+    return prices
 
-    price = usdc_reserve / eth_reserve
-    return price
+async def get_aerodrome_prices():
+    """Get all Aerodrome pool prices"""
+    if not AERODROME_SUBGRAPH:
+        print("AERODROME_SUBGRAPH not configured")
+        return {}
+    
+    query = {
+        "query": """
+        {
+          pairs(first: 200) {
+            id
+            token0 { id symbol }
+            token1 { id symbol }
+            reserve0
+            reserve1
+            totalSupply
+          }
+        }
+        """
+    }
+    
+    async with aiohttp.ClientSession() as session:
+        async with session.post(AERODROME_SUBGRAPH, json=query) as resp:
+            result = await resp.json()
+            pairs = result.get("data", {}).get("pairs", [])
+            
+            prices = {}
+            for pair in pairs:
+                try:
+                    reserve0 = float(pair.get("reserve0", 0))
+                    reserve1 = float(pair.get("reserve1", 0))
+                    
+                    if reserve0 > 0 and reserve1 > 0:
+                        price = reserve1 / reserve0
+                        t0 = pair["token0"]
+                        t1 = pair["token1"]
+                        pair_key = f"{t0['symbol']}/{t1['symbol']}"
+                        
+                        prices[pair_key] = {
+                            'price': price,
+                            'pool_id': pair['id'],
+                            'token0': t0['id'],
+                            'token1': t1['id']
+                        }
+                except Exception:
+                    continue
+            
+            return prices
 
-def get_sushiswap_pairs():
-    pair = w3.eth.contract(address=SUSHI_PAIR, abi=PAIR_ABI)
-    token0 = pair.functions.token0().call()
-    token1 = pair.functions.token1().call()
-    tokens = [token0, token1]
-    symbols = []
-    for token in tokens:
-        try:
-            erc20 = w3.eth.contract(address=token, abi=[{"constant":True,"inputs":[],"name":"symbol","outputs":[{"name":"","type":"string"}],"type":"function"}])
-            symbol = erc20.functions.symbol().call()
-            symbols.append(symbol)
-        except Exception as e:
-            symbols.append("?")
-    print(f"SushiSwap pair: {symbols[0]}/{symbols[1]} ({token0}/{token1})")
+def find_arbitrage_opportunities(uniswap_prices, sushiswap_prices, aerodrome_prices):
+    """Find arbitrage opportunities across all DEXes"""
+    opportunities = []
+    
+    # Combine all prices
+    all_prices = {
+        'Uniswap': uniswap_prices,
+        'SushiSwap': sushiswap_prices,
+        'Aerodrome': aerodrome_prices
+    }
+    
+    # Find common pairs across DEXes
+    all_pairs = set()
+    for dex_prices in all_prices.values():
+        all_pairs.update(dex_prices.keys())
+    
+    for pair in all_pairs:
+        pair_prices = {}
+        for dex_name, dex_prices in all_prices.items():
+            if pair in dex_prices:
+                pair_prices[dex_name] = dex_prices[pair]['price']
+        
+        if len(pair_prices) >= 2:  # Need at least 2 DEXes for arbitrage
+            prices = list(pair_prices.values())
+            min_price = min(prices)
+            max_price = max(prices)
+            
+            if max_price > min_price:
+                # Find which DEX has min/max prices
+                buy_dex = [k for k, v in pair_prices.items() if v == min_price][0]
+                sell_dex = [k for k, v in pair_prices.items() if v == max_price][0]
+                
+                profit_pct = ((max_price - min_price) / min_price) * 100
+                
+                if profit_pct > 0.5:  # Only show opportunities >0.5%
+                    opportunities.append({
+                        'pair': pair,
+                        'buy_dex': buy_dex,
+                        'sell_dex': sell_dex,
+                        'buy_price': min_price,
+                        'sell_price': max_price,
+                        'profit_pct': profit_pct,
+                        'estimated_profit': estimate_profit(min_price, max_price, DEFAULT_ETH_AMOUNT)
+                    })
+    
+    return sorted(opportunities, key=lambda x: x['profit_pct'], reverse=True)
 
 def estimate_profit(buy_price, sell_price, eth_amount=DEFAULT_ETH_AMOUNT, gas_eth=DEFAULT_GAS_ETH, slippage_pct=DEFAULT_SLIPPAGE_PCT):
     gross_profit = (sell_price - buy_price) * eth_amount
@@ -104,83 +230,39 @@ def estimate_profit(buy_price, sell_price, eth_amount=DEFAULT_ETH_AMOUNT, gas_et
     return net_profit
 
 async def monitor():
+    """Main monitoring loop that finds the best arbitrage opportunities"""
     while True:
-        uni_price = await get_uniswap_price()
-        sushi_price = get_sushiswap_price()
-        eth_amount = DEFAULT_ETH_AMOUNT  # Simulate with 1 ETH
-
-        if uni_price and sushi_price:
-            print(f"[Uniswap] {uni_price:.2f} | [SushiSwap] {sushi_price:.2f}")
-
-            # Arbitrage direction
-            if sushi_price > uni_price:
-                profit = estimate_profit(uni_price, sushi_price, eth_amount)
-                if profit > 0:
-                    print(f"🔥 Arbitrage: Buy Uniswap @ {uni_price:.2f}, Sell Sushi @ {sushi_price:.2f} | Net Profit: ${profit:.2f}")
-            elif uni_price > sushi_price:
-                profit = estimate_profit(sushi_price, uni_price, eth_amount)
-                if profit > 0:
-                    print(f"🔥 Arbitrage: Buy Sushi @ {sushi_price:.2f}, Sell Uniswap @ {uni_price:.2f} | Net Profit: ${profit:.2f}")
-            else:
-                print("No arbitrage.")
-        else:
-            print("Price fetch failed.")
-
-        await asyncio.sleep(10)
-
-async def get_aerodrome_pairs():
-    query = {
-        "query": """
-        {
-          pairs(first: 100) {
-            id
-            token0 { id symbol }
-            token1 { id symbol }
-          }
-        }
-        """
-    }
-    
-    if not AERODROME_SUBGRAPH:
-        print("AERODROME_SUBGRAPH not configured")
-        return
+        print("\n" + "="*60)
+        print("🔍 Scanning for arbitrage opportunities...")
+        print("="*60)
         
-    async with aiohttp.ClientSession() as session:
-        async with session.post(AERODROME_SUBGRAPH, json=query) as resp:
-            result = await resp.json()
-            print("Aerodrome subgraph response:", result)  # Debug print
-            pairs = result.get("data", {}).get("pairs", [])
-            print("Aerodrome pairs:")
-            for pair in pairs:
-                t0 = pair["token0"]
-                t1 = pair["token1"]
-                print(f"{t0['symbol']}/{t1['symbol']} ({t0['id']}/{t1['id']})")
+        # Get prices from all DEXes
+        uniswap_prices = await get_uniswap_prices()
+        sushiswap_prices = await get_sushiswap_prices()
+        aerodrome_prices = await get_aerodrome_prices()
+        
+        print(f"📊 Found {len(uniswap_prices)} Uniswap pools")
+        print(f"📊 Found {len(sushiswap_prices)} SushiSwap pools")
+        print(f"📊 Found {len(aerodrome_prices)} Aerodrome pools")
+        
+        # Find arbitrage opportunities
+        opportunities = find_arbitrage_opportunities(uniswap_prices, sushiswap_prices, aerodrome_prices)
+        
+        if opportunities:
+            print(f"\n🔥 Found {len(opportunities)} arbitrage opportunities:")
+            print("-" * 60)
+            
+            for i, opp in enumerate(opportunities[:5]):  # Show top 5
+                print(f"{i+1}. {opp['pair']}")
+                print(f"   Buy on {opp['buy_dex']} @ {opp['buy_price']:.6f}")
+                print(f"   Sell on {opp['sell_dex']} @ {opp['sell_price']:.6f}")
+                print(f"   Profit: {opp['profit_pct']:.2f}% | Est. Net: ${opp['estimated_profit']:.2f}")
+                print()
+        else:
+            print("❌ No profitable arbitrage opportunities found")
+        
+        print(f"⏰ Next scan in 30 seconds...")
+        await asyncio.sleep(30)
 
-async def get_all_sushiswap_pairs():
-    factory = w3.eth.contract(address=SUSHI_FACTORY, abi=SUSHI_FACTORY_ABI)
-    pair_abi = PAIR_ABI
-    try:
-        total_pairs = factory.functions.allPairsLength().call()
-    except Exception as e:
-        print(f"Error fetching SushiSwap allPairsLength: {e}")
-        return
-    print(f"SushiSwap pairs (showing first 50 of {total_pairs}):")
-    for i in range(min(50, total_pairs)):
-        try:
-            pair_addr = factory.functions.allPairs(i).call()
-            pair = w3.eth.contract(address=pair_addr, abi=pair_abi)
-            token0 = pair.functions.token0().call()
-            token1 = pair.functions.token1().call()
-            symbols = []
-            for token in [token0, token1]:
-                try:
-                    erc20 = w3.eth.contract(address=token, abi=[{"constant":True,"inputs":[],"name":"symbol","outputs":[{"name":"","type":"string"}],"type":"function"}])
-                    symbol = erc20.functions.symbol().call()
-                    symbols.append(symbol)
-                except Exception:
-                    symbols.append("?")
-            print(f"{symbols[0]}/{symbols[1]} ({token0}/{token1})")
-        except Exception as e:
-            print(f"Error fetching pair {i}: {e}")
-
-asyncio.run(monitor())
+if __name__ == "__main__":
+    asyncio.run(monitor())
