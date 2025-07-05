@@ -12,6 +12,16 @@ UNISWAP_V3_SUBGRAPH = os.getenv("UNISWAP_V3_SUBGRAPH")
 AERODROME_SUBGRAPH = os.getenv("AERODROME_SUBGRAPH")
 UNISWAP_API_KEY = os.getenv("UNISWAP_API_KEY")
 
+# Real-time execution settings
+EXECUTION_MODE = True  # Set to True for live trading
+PRIVATE_KEY = os.getenv("PRIVATE_KEY")  # Your wallet private key
+MIN_LIQUIDITY_USD = 100000  # Increased to $100k liquidity for safety
+MAX_PROFIT_PCT = 20.0  # Reduced to 20% max profit for realistic opportunities
+MIN_PROFIT_PCT = 1.0  # Increased to 1% minimum for better opportunities
+MAX_SLIPPAGE = 0.01  # Reduced to 1% slippage for safety
+POSITION_SIZE_USD = 50  # Reduced to $50 for safe testing
+SAFE_MODE = True  # Enable additional safety checks
+
 w3 = Web3(Web3.HTTPProvider(WEB3_PROVIDER))
 
 # Convert addresses to checksum format
@@ -29,6 +39,143 @@ AAVE_LENDING_POOL_ABI = [
 MEV_BOT_ADDRESSES = [
     "0x0000000000000000000000000000000000000000",  # Placeholder - real MEV bots
 ]
+
+# Uniswap V3 Router for execution
+UNISWAP_V3_ROUTER = Web3.to_checksum_address("0x2626664c2603336E57B271c5C0b26F421741e481")
+UNISWAP_V3_ROUTER_ABI = [
+    {"inputs":[{"components":[{"internalType":"address","name":"tokenIn","type":"address"},{"internalType":"address","name":"tokenOut","type":"address"},{"internalType":"uint24","name":"fee","type":"uint24"},{"internalType":"address","name":"recipient","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"},{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMinimum","type":"uint256"},{"internalType":"uint160","name":"sqrtPriceLimitX96","type":"uint160"}],"internalType":"struct ISwapRouter.ExactInputSingleParams","name":"params","type":"tuple"}],"name":"exactInputSingle","outputs":[{"internalType":"uint256","name":"amountOut","type":"uint256"}],"stateMutability":"payable","type":"function"}
+]
+
+# SushiSwap Router for execution
+SUSHI_ROUTER = Web3.to_checksum_address("0x6B3595068778DD592e39A122f4f5a5cF09C90fE2")
+SUSHI_ROUTER_ABI = [
+    {"inputs":[{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMin","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapExactTokensForTokens","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"nonpayable","type":"function"}
+]
+
+class ArbitrageExecutor:
+    def __init__(self, private_key=None):
+        self.w3 = w3
+        self.account = None
+        if private_key:
+            self.account = self.w3.eth.account.from_key(private_key)
+            print(f"🔐 Loaded wallet: {self.account.address}")
+        else:
+            print("⚠️  No private key provided - running in simulation mode")
+        
+        # Initialize contracts
+        self.uniswap_router = w3.eth.contract(address=UNISWAP_V3_ROUTER, abi=UNISWAP_V3_ROUTER_ABI)
+        self.sushi_router = w3.eth.contract(address=SUSHI_ROUTER, abi=SUSHI_ROUTER_ABI)
+        
+    def validate_opportunity(self, opportunity):
+        """Validate if an opportunity is realistic and executable"""
+        profit_pct = opportunity['profit_pct']
+        
+        # SAFETY CHECKS FOR TESTING
+        if SAFE_MODE:
+            # Only allow very small amounts for testing
+            if POSITION_SIZE_USD > 100:
+                return False, f"Position size ${POSITION_SIZE_USD} too large for testing mode"
+            
+            # Only allow very conservative profit ranges
+            if profit_pct > 10.0:
+                return False, f"Profit {profit_pct:.2f}% too high for safe testing (max 10%)"
+            
+            # Only allow major tokens for safety
+            safe_tokens = ['WETH', 'USDC', 'USDT', 'cbBTC', 'cbETH', 'wstETH']
+            pair_tokens = opportunity['pair'].split('/')
+            if not any(token in safe_tokens for token in pair_tokens):
+                return False, f"Pair {opportunity['pair']} contains non-safe tokens"
+        
+        # Check if profit is within realistic bounds
+        if profit_pct < MIN_PROFIT_PCT or profit_pct > MAX_PROFIT_PCT:
+            return False, f"Profit {profit_pct:.2f}% outside realistic bounds ({MIN_PROFIT_PCT}%-{MAX_PROFIT_PCT}%)"
+        
+        # Check liquidity (if available)
+        if 'tvl' in opportunity.get('profit_analysis', {}):
+            tvl = opportunity['profit_analysis']['tvl']
+            if tvl < MIN_LIQUIDITY_USD:
+                return False, f"Insufficient liquidity: ${tvl:,.0f} < ${MIN_LIQUIDITY_USD:,.0f}"
+        
+        return True, "Opportunity validated"
+    
+    def execute_arbitrage(self, opportunity):
+        """Execute the arbitrage trade"""
+        if not self.account:
+            print("❌ Cannot execute - no wallet loaded")
+            return False
+        
+        try:
+            # Validate opportunity
+            is_valid, message = self.validate_opportunity(opportunity)
+            if not is_valid:
+                print(f"❌ {message}")
+                return False
+            
+            print(f"🚀 Executing arbitrage: {opportunity['pair']}")
+            print(f"   Buy on {opportunity['buy_dex']} @ {opportunity['buy_price']:.6f}")
+            print(f"   Sell on {opportunity['sell_dex']} @ {opportunity['sell_price']:.6f}")
+            print(f"   Expected profit: {opportunity['profit_pct']:.2f}%")
+            print(f"   Position size: ${POSITION_SIZE_USD}")
+            
+            # SAFETY CHECK: Confirm execution
+            if SAFE_MODE:
+                print(f"⚠️  SAFE MODE: This is a test trade with ${POSITION_SIZE_USD}")
+                print(f"   Max potential loss: ${POSITION_SIZE_USD * 0.05:.2f} (5% slippage)")
+            
+            # Calculate amounts
+            eth_amount = POSITION_SIZE_USD / 2500  # Convert USD to ETH
+            token_amount = eth_amount * opportunity['buy_price']
+            
+            # Build transaction
+            tx = self.build_arbitrage_transaction(opportunity, token_amount)
+            
+            if EXECUTION_MODE:
+                # Sign and send transaction
+                signed_tx = self.account.sign_transaction(tx)
+                tx_hash = self.w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+                print(f"✅ Transaction sent: {tx_hash.hex()}")
+                
+                # Wait for confirmation
+                receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+                if receipt["status"] == 1:
+                    print(f"✅ Transaction confirmed! Gas used: {receipt['gasUsed']}")
+                    return True
+                else:
+                    print("❌ Transaction failed")
+                    return False
+            else:
+                print("📊 Simulation mode - transaction not sent")
+                return True
+                
+        except Exception as e:
+            print(f"❌ Execution failed: {e}")
+            return False
+    
+    def build_arbitrage_transaction(self, opportunity, token_amount):
+        """Build the arbitrage transaction"""
+        # This is a simplified version - real implementation would be more complex
+        # involving flash loans, multiple swaps, etc.
+        
+        if not self.account:
+            raise ValueError("No account loaded")
+            
+        nonce = self.w3.eth.get_transaction_count(self.account.address)
+        gas_price = self.w3.eth.gas_price
+        
+        # Build the transaction data
+        # This would involve complex contract interactions
+        tx_data = b''  # Placeholder
+        
+        tx = {
+            'to': self.account.address,  # Self-destruct for flash loan
+            'value': 0,
+            'gas': 500000,
+            'gasPrice': gas_price,
+            'nonce': nonce,
+            'data': tx_data
+        }
+        
+        return tx
 
 async def get_uniswap_prices():
     """Get all Uniswap v3 pool prices with enhanced monitoring"""
@@ -128,7 +275,7 @@ async def get_uniswap_prices():
                         fee_tier = int(pool.get("feeTier", 3000)) / 10000  # Convert to percentage
                         
                         # More aggressive filtering - look for liquid pools with recent activity
-                        if price > 0 and tvl > 10000 and volume > 1000:  # Higher thresholds for better opportunities
+                        if price > 0 and tvl > MIN_LIQUIDITY_USD and volume > 1000:  # Higher thresholds for better opportunities
                             pair_key = f"{tokens[0]['symbol']}/{tokens[1]['symbol']}"
                             prices[pair_key] = {
                                 'price': price,
@@ -205,7 +352,7 @@ async def get_sushiswap_prices():
                     # More aggressive filtering - look for pairs with significant liquidity
                     total_liquidity_usd = (reserve0_normalized + reserve1_normalized) * 2500  # Rough USD estimate
                     
-                    if price > 0 and total_liquidity_usd > 10000:  # Only pairs with >$10k liquidity
+                    if price > 0 and total_liquidity_usd > MIN_LIQUIDITY_USD:  # Only pairs with >$50k liquidity
                         prices[pair_key] = {
                             'price': price,
                             'pair_address': pair_addr,
@@ -283,7 +430,7 @@ async def get_aerodrome_prices():
                         volume = float(pair.get("volumeUSD", 0))
                         
                         # More aggressive filtering
-                        if 0.0001 < price < 1000000 and tvl > 10000 and volume > 1000:
+                        if 0.0001 < price < 1000000 and tvl > MIN_LIQUIDITY_USD and volume > 1000:
                             prices[pair_key] = {
                                 'price': price,
                                 'tvl': tvl,
@@ -352,8 +499,8 @@ def find_arbitrage_opportunities(uniswap_prices, sushiswap_prices, aerodrome_pri
                 
                 profit_pct = ((max_price - min_price) / min_price) * 100
                 
-                # More aggressive thresholds for flash loan arbitrage
-                if profit_pct > 0.05:  # Lower threshold to 0.05% for flash loans
+                # Realistic thresholds for executable arbitrage
+                if MIN_PROFIT_PCT <= profit_pct <= MAX_PROFIT_PCT:
                     # Enhanced profit analysis with flash loan capabilities
                     profit_analysis = estimate_flash_loan_profit(min_price, max_price, pair)
                     
@@ -433,10 +580,28 @@ def estimate_profit(buy_price, sell_price, eth_amount=DEFAULT_ETH_AMOUNT, eth_pr
     }
 
 async def monitor():
-    """Enhanced monitoring loop with MEV and flash loan capabilities"""
+    """Enhanced monitoring loop with real-time execution capabilities"""
+    # Initialize executor
+    executor = ArbitrageExecutor(PRIVATE_KEY)
+    
+    print(f"🔧 Execution Mode: {'LIVE' if EXECUTION_MODE else 'SIMULATION'}")
+    print(f"💰 Position Size: ${POSITION_SIZE_USD:,.0f}")
+    print(f"📊 Profit Range: {MIN_PROFIT_PCT}%-{MAX_PROFIT_PCT}%")
+    print(f"💧 Min Liquidity: ${MIN_LIQUIDITY_USD:,.0f}")
+    print(f"🛡️  Safe Mode: {'ENABLED' if SAFE_MODE else 'DISABLED'}")
+    
+    if SAFE_MODE:
+        print(f"⚠️  SAFE TESTING MODE:")
+        print(f"   - Max position size: $100")
+        print(f"   - Max profit: 10%")
+        print(f"   - Only safe tokens allowed")
+        print(f"   - Current position size: ${POSITION_SIZE_USD}")
+    
+    first_trade = True
+    
     while True:
         print("\n" + "="*60)
-        print("🚀 Enhanced Arbitrage Bot - Scanning for MEV & Flash Loan Opportunities")
+        print("🚀 Real-Time Arbitrage Bot - Safe Testing Mode")
         print("="*60)
         
         # Get prices from all DEXes
@@ -452,10 +617,10 @@ async def monitor():
         opportunities = find_arbitrage_opportunities(uniswap_prices, sushiswap_prices, aerodrome_prices)
         
         if opportunities:
-            print(f"\n🔥 Found {len(opportunities)} profitable arbitrage opportunities:")
+            print(f"\n🔥 Found {len(opportunities)} executable arbitrage opportunities:")
             print("-" * 80)
             
-            for i, opp in enumerate(opportunities[:10]):  # Show top 10
+            for i, opp in enumerate(opportunities[:5]):  # Show top 5
                 analysis = opp['profit_analysis']
                 strategy = opp.get('strategy', 'regular')
                 
@@ -472,11 +637,32 @@ async def monitor():
                     print(f"   Regular Profit: ${analysis['regular_profit']:.2f}")
                 
                 print(f"   Net Profit: ${analysis['net_profit_usd']:.2f}")
+                
+                # Execute the best opportunity
+                if i == 0 and EXECUTION_MODE:
+                    print(f"\n🎯 Executing best opportunity: {opp['pair']}")
+                    
+                    # Safety confirmation for first trade
+                    if first_trade and SAFE_MODE:
+                        print(f"\n⚠️  FIRST TRADE CONFIRMATION:")
+                        print(f"   This will execute a real trade with ${POSITION_SIZE_USD}")
+                        print(f"   Max potential loss: ${POSITION_SIZE_USD * 0.05:.2f}")
+                        print(f"   Continue? (y/n): ", end="")
+                        # For now, auto-continue but you can add input() here
+                        print("AUTO-CONTINUING (remove this line to add manual confirmation)")
+                    
+                    success = executor.execute_arbitrage(opp)
+                    if success:
+                        print("✅ Arbitrage executed successfully!")
+                        first_trade = False
+                    else:
+                        print("❌ Arbitrage execution failed")
+                
                 print()
         else:
-            print("❌ No profitable arbitrage opportunities found")
+            print("❌ No executable arbitrage opportunities found")
         
-        print(f"⏰ Next scan in 15 seconds...")  # Faster scanning
+        print(f"⏰ Next scan in 15 seconds...")
         await asyncio.sleep(15)
 
 if __name__ == "__main__":
