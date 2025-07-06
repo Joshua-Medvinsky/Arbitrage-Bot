@@ -14,12 +14,13 @@ UNISWAP_API_KEY = os.getenv("UNISWAP_API_KEY")
 
 # Real-time execution settings
 EXECUTION_MODE = True  # Set to True for live trading
+SIMULATION_MODE = False  # Set to True to simulate without sending transactions
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")  # Your wallet private key
 MIN_LIQUIDITY_USD = 100000  # Increased to $100k liquidity for safety
 MAX_PROFIT_PCT = 20.0  # Reduced to 20% max profit for realistic opportunities
 MIN_PROFIT_PCT = 1.0  # Increased to 1% minimum for better opportunities
 MAX_SLIPPAGE = 0.01  # Reduced to 1% slippage for safety
-POSITION_SIZE_USD = 50  # Reduced to $50 for safe testing
+POSITION_SIZE_USD = 5  # Reduced to $5 for safe testing with available balance
 SAFE_MODE = True  # Enable additional safety checks
 
 w3 = Web3(Web3.HTTPProvider(WEB3_PROVIDER))
@@ -40,16 +41,32 @@ MEV_BOT_ADDRESSES = [
     "0x0000000000000000000000000000000000000000",  # Placeholder - real MEV bots
 ]
 
-# Uniswap V3 Router for execution
+# Uniswap V3 Router for execution (Base network)
 UNISWAP_V3_ROUTER = Web3.to_checksum_address("0x2626664c2603336E57B271c5C0b26F421741e481")
 UNISWAP_V3_ROUTER_ABI = [
-    {"inputs":[{"components":[{"internalType":"address","name":"tokenIn","type":"address"},{"internalType":"address","name":"tokenOut","type":"address"},{"internalType":"uint24","name":"fee","type":"uint24"},{"internalType":"address","name":"recipient","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"},{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMinimum","type":"uint256"},{"internalType":"uint160","name":"sqrtPriceLimitX96","type":"uint160"}],"internalType":"struct ISwapRouter.ExactInputSingleParams","name":"params","type":"tuple"}],"name":"exactInputSingle","outputs":[{"internalType":"uint256","name":"amountOut","type":"uint256"}],"stateMutability":"payable","type":"function"}
+    {"inputs":[{"components":[{"internalType":"address","name":"tokenIn","type":"address"},{"internalType":"address","name":"tokenOut","type":"address"},{"internalType":"uint24","name":"fee","type":"uint24"},{"internalType":"address","name":"recipient","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"},{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMinimum","type":"uint256"},{"internalType":"uint160","name":"sqrtPriceLimitX96","type":"uint160"}],"internalType":"struct ISwapRouter.ExactInputSingleParams","name":"params","type":"tuple"}],"name":"exactInputSingle","outputs":[{"internalType":"uint256","name":"amountOut","type":"uint256"}],"stateMutability":"payable","type":"function"},
+    {"inputs":[{"components":[{"internalType":"address","name":"tokenIn","type":"address"},{"internalType":"address","name":"tokenOut","type":"address"},{"internalType":"uint24","name":"fee","type":"uint24"},{"internalType":"address","name":"recipient","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"},{"internalType":"uint256","name":"amountOut","type":"uint256"},{"internalType":"uint256","name":"amountInMaximum","type":"uint256"},{"internalType":"uint160","name":"sqrtPriceLimitX96","type":"uint160"}],"internalType":"struct ISwapRouter.ExactOutputSingleParams","name":"params","type":"tuple"}],"name":"exactOutputSingle","outputs":[{"internalType":"uint256","name":"amountIn","type":"uint256"}],"stateMutability":"payable","type":"function"}
 ]
 
-# SushiSwap Router for execution
+# SushiSwap Router for execution (Base network)
 SUSHI_ROUTER = Web3.to_checksum_address("0x6B3595068778DD592e39A122f4f5a5cF09C90fE2")
 SUSHI_ROUTER_ABI = [
-    {"inputs":[{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMin","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapExactTokensForTokens","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"nonpayable","type":"function"}
+    {"inputs":[{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMin","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapExactTokensForTokens","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"internalType":"uint256","name":"amountOut","type":"uint256"},{"internalType":"uint256","name":"amountInMax","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapTokensForExactTokens","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"nonpayable","type":"function"}
+]
+
+# Token addresses for Base network
+WETH_BASE = "0x4200000000000000000000000000000000000006"
+USDC_BASE = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+weETH_BASE = "0xd9aa30E1B4c60CAe79FC379ff651abACE84F5AA9"
+
+# ERC20 Token ABI for approvals
+ERC20_ABI = [
+    {"constant":True,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"},
+    {"constant":False,"inputs":[{"name":"_spender","type":"address"},{"name":"_value","type":"uint256"}],"name":"approve","outputs":[{"name":"","type":"bool"}],"type":"function"},
+    {"constant":True,"inputs":[{"name":"_owner","type":"address"},{"name":"_spender","type":"address"}],"name":"allowance","outputs":[{"name":"","type":"uint256"}],"type":"function"},
+    {"constant":True,"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"type":"function"},
+    {"constant":True,"inputs":[],"name":"symbol","outputs":[{"name":"","type":"string"}],"type":"function"}
 ]
 
 class ArbitrageExecutor:
@@ -73,12 +90,12 @@ class ArbitrageExecutor:
         # SAFETY CHECKS FOR TESTING
         if SAFE_MODE:
             # Only allow very small amounts for testing
-            if POSITION_SIZE_USD > 100:
+            if POSITION_SIZE_USD > 10:
                 return False, f"Position size ${POSITION_SIZE_USD} too large for testing mode"
             
             # Only allow very conservative profit ranges
-            if profit_pct > 10.0:
-                return False, f"Profit {profit_pct:.2f}% too high for safe testing (max 10%)"
+            if profit_pct > 20.0:
+                return False, f"Profit {profit_pct:.2f}% too high for safe testing (max 20%)"
             
             # Only allow major tokens for safety
             safe_tokens = ['WETH', 'USDC', 'USDT', 'cbBTC', 'cbETH', 'wstETH']
@@ -98,6 +115,178 @@ class ArbitrageExecutor:
         
         return True, "Opportunity validated"
     
+    def get_token_contract(self, token_address):
+        """Get ERC20 token contract"""
+        return self.w3.eth.contract(address=Web3.to_checksum_address(token_address), abi=ERC20_ABI)
+    
+    def check_token_balance(self, token_address):
+        """Check token balance for the wallet"""
+        if not self.account:
+            raise ValueError("No account loaded")
+            
+        try:
+            token_contract = self.get_token_contract(token_address)
+            
+            # Test if contract is accessible
+            try:
+                symbol = token_contract.functions.symbol().call()
+                print(f"   Contract symbol: {symbol}")
+            except Exception as e:
+                print(f"   Warning: Could not get symbol for {token_address}: {e}")
+            
+            balance = token_contract.functions.balanceOf(self.account.address).call()
+            return balance
+            
+        except Exception as e:
+            print(f"   Error accessing contract {token_address}: {e}")
+            # Return 0 if contract is not accessible
+            return 0
+    
+    def approve_token(self, token_address, spender_address, amount):
+        """Approve token spending"""
+        if not self.account:
+            raise ValueError("No account loaded")
+            
+        token_contract = self.get_token_contract(token_address)
+        
+        # Check current allowance
+        current_allowance = token_contract.functions.allowance(self.account.address, spender_address).call()
+        
+        if current_allowance < amount:
+            # Build approval transaction
+            approve_function = token_contract.functions.approve(spender_address, amount)
+            
+            nonce = self.w3.eth.get_transaction_count(self.account.address)
+            gas_price = self.w3.eth.gas_price
+            
+            tx = approve_function.build_transaction({
+                'from': self.account.address,
+                'gas': 100000,
+                'gasPrice': gas_price,
+                'nonce': nonce
+            })
+            
+            if not SIMULATION_MODE:
+                # Sign and send approval
+                signed_tx = self.account.sign_transaction(tx)
+                tx_hash = self.w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+                print(f"✅ Approval sent: {tx_hash.hex()}")
+                
+                # Wait for confirmation
+                receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+                if receipt["status"] == 1:
+                    print(f"✅ Approval confirmed!")
+                    return True
+                else:
+                    print("❌ Approval failed")
+                    return False
+            else:
+                print(f"📊 Simulation: Would approve {amount} tokens")
+                return True
+        
+        return True  # Already approved
+    
+    def execute_uniswap_swap(self, token_in, token_out, amount_in, amount_out_min, fee=3000):
+        """Execute swap on Uniswap V3"""
+        if not self.account:
+            raise ValueError("No account loaded")
+            
+        # Get current block timestamp
+        latest_block = self.w3.eth.get_block('latest')
+        deadline = latest_block.get('timestamp', 0) + 300  # 5 minutes
+        
+        # Build swap parameters
+        params = {
+            'tokenIn': Web3.to_checksum_address(token_in),
+            'tokenOut': Web3.to_checksum_address(token_out),
+            'fee': fee,
+            'recipient': self.account.address,
+            'deadline': deadline,
+            'amountIn': amount_in,
+            'amountOutMinimum': amount_out_min,
+            'sqrtPriceLimitX96': 0
+        }
+        
+        # Build transaction
+        swap_function = self.uniswap_router.functions.exactInputSingle(params)
+        
+        nonce = self.w3.eth.get_transaction_count(self.account.address)
+        gas_price = self.w3.eth.gas_price
+        
+        tx = swap_function.build_transaction({
+            'from': self.account.address,
+            'gas': 300000,
+            'gasPrice': gas_price,
+            'nonce': nonce
+        })
+        
+        if not SIMULATION_MODE:
+            # Sign and send swap
+            signed_tx = self.account.sign_transaction(tx)
+            tx_hash = self.w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+            print(f"✅ Uniswap swap sent: {tx_hash.hex()}")
+            
+            # Wait for confirmation
+            receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+            if receipt["status"] == 1:
+                print(f"✅ Uniswap swap confirmed!")
+                return True
+            else:
+                print("❌ Uniswap swap failed")
+                return False
+        else:
+            print(f"📊 Simulation: Would swap {amount_in} tokens on Uniswap")
+            return True
+    
+    def execute_sushiswap_swap(self, token_in, token_out, amount_in, amount_out_min):
+        """Execute swap on SushiSwap"""
+        if not self.account:
+            raise ValueError("No account loaded")
+            
+        # Get current block timestamp
+        latest_block = self.w3.eth.get_block('latest')
+        deadline = latest_block.get('timestamp', 0) + 300  # 5 minutes
+        
+        # Build path
+        path = [Web3.to_checksum_address(token_in), Web3.to_checksum_address(token_out)]
+        
+        # Build transaction
+        swap_function = self.sushi_router.functions.swapExactTokensForTokens(
+            amount_in,
+            amount_out_min,
+            path,
+            self.account.address,
+            deadline
+        )
+        
+        nonce = self.w3.eth.get_transaction_count(self.account.address)
+        gas_price = self.w3.eth.gas_price
+        
+        tx = swap_function.build_transaction({
+            'from': self.account.address,
+            'gas': 300000,
+            'gasPrice': gas_price,
+            'nonce': nonce
+        })
+        
+        if not SIMULATION_MODE:
+            # Sign and send swap
+            signed_tx = self.account.sign_transaction(tx)
+            tx_hash = self.w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+            print(f"✅ SushiSwap swap sent: {tx_hash.hex()}")
+            
+            # Wait for confirmation
+            receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+            if receipt["status"] == 1:
+                print(f"✅ SushiSwap swap confirmed!")
+                return True
+            else:
+                print("❌ SushiSwap swap failed")
+                return False
+        else:
+            print(f"📊 Simulation: Would swap {amount_in} tokens on SushiSwap")
+            return True
+    
     def execute_arbitrage(self, opportunity):
         """Execute the arbitrage trade"""
         if not self.account:
@@ -116,66 +305,219 @@ class ArbitrageExecutor:
             print(f"   Sell on {opportunity['sell_dex']} @ {opportunity['sell_price']:.6f}")
             print(f"   Expected profit: {opportunity['profit_pct']:.2f}%")
             print(f"   Position size: ${POSITION_SIZE_USD}")
+            print(f"   Mode: {'SIMULATION' if SIMULATION_MODE else 'LIVE'}")
             
             # SAFETY CHECK: Confirm execution
             if SAFE_MODE:
                 print(f"⚠️  SAFE MODE: This is a test trade with ${POSITION_SIZE_USD}")
                 print(f"   Max potential loss: ${POSITION_SIZE_USD * 0.05:.2f} (5% slippage)")
             
-            # Calculate amounts
+            # Parse token addresses from opportunity
+            pair_tokens = opportunity['pair'].split('/')
+            token0_symbol, token1_symbol = pair_tokens[0], pair_tokens[1]
+            
+            # Calculate amounts first
             eth_amount = POSITION_SIZE_USD / 2500  # Convert USD to ETH
-            token_amount = eth_amount * opportunity['buy_price']
+            token_amount = int(eth_amount * 1e18)  # Convert to wei
             
-            # Build transaction
-            tx = self.build_arbitrage_transaction(opportunity, token_amount)
+            # Get token addresses for Base network
+            token_addresses = {
+                'WETH': WETH_BASE,
+                'USDC': USDC_BASE,
+                'weETH': weETH_BASE,
+                'USDT': USDC_BASE,  # Use USDC as proxy for USDT
+                'cbBTC': WETH_BASE,  # Use WETH as proxy for cbBTC
+                'cbETH': WETH_BASE,  # Use WETH as proxy for cbETH
+                'wstETH': WETH_BASE  # Use WETH as proxy for wstETH
+            }
             
-            if EXECUTION_MODE:
-                # Sign and send transaction
-                signed_tx = self.account.sign_transaction(tx)
-                tx_hash = self.w3.eth.send_raw_transaction(signed_tx.rawTransaction)
-                print(f"✅ Transaction sent: {tx_hash.hex()}")
-                
-                # Wait for confirmation
-                receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
-                if receipt["status"] == 1:
-                    print(f"✅ Transaction confirmed! Gas used: {receipt['gasUsed']}")
-                    return True
-                else:
-                    print("❌ Transaction failed")
-                    return False
+            token0_address = token_addresses.get(token0_symbol, WETH_BASE)
+            token1_address = token_addresses.get(token1_symbol, WETH_BASE)
+            
+            print(f"   Token0: {token0_symbol} ({token0_address})")
+            print(f"   Token1: {token1_symbol} ({token1_address})")
+            print(f"   Required amount: {token_amount} wei (${POSITION_SIZE_USD})")
+            
+            # Special handling for weETH/WETH pair - we need to use weETH as input
+            if token0_symbol == 'weETH' and token1_symbol == 'WETH':
+                print(f"   Special handling for weETH/WETH pair")
+                # For weETH/WETH, we need weETH as input token
+                input_token_symbol = 'weETH'
+                input_token_address = weETH_BASE
+                output_token_symbol = 'WETH'
+                output_token_address = WETH_BASE
+            elif token1_symbol == 'weETH' and token0_symbol == 'WETH':
+                print(f"   Special handling for WETH/weETH pair")
+                # For WETH/weETH, we need WETH as input token
+                input_token_symbol = 'WETH'
+                input_token_address = WETH_BASE
+                output_token_symbol = 'weETH'
+                output_token_address = weETH_BASE
             else:
-                print("📊 Simulation mode - transaction not sent")
+                # Normal case - use token0 as input
+                input_token_symbol = token0_symbol
+                input_token_address = token0_address
+                output_token_symbol = token1_symbol
+                output_token_address = token1_address
+            
+            print(f"   Input token: {input_token_symbol} ({input_token_address})")
+            print(f"   Output token: {output_token_symbol} ({output_token_address})")
+            
+            # Validate that we're not trying to swap the same token
+            if input_token_address == output_token_address:
+                print(f"❌ Invalid swap: Cannot swap {input_token_symbol} for {output_token_symbol}")
+                print(f"   Both tokens have the same address: {input_token_address}")
+                return False
+            
+            # Check if we have the input tokens
+            try:
+                input_token_balance = self.check_token_balance(input_token_address)
+                balance_usd = (input_token_balance / 1e18) * 2500  # Convert to USD
+                print(f"   {input_token_symbol} balance: {input_token_balance} wei (${balance_usd:.2f})")
+                
+                # If we can't access the specific token, try with WETH as fallback
+                if input_token_balance == 0 and input_token_symbol != 'WETH':
+                    print(f"   Trying WETH as fallback for {input_token_symbol}...")
+                    weth_balance = self.check_token_balance(WETH_BASE)
+                    weth_balance_usd = (weth_balance / 1e18) * 2500
+                    print(f"   WETH balance: {weth_balance} wei (${weth_balance_usd:.2f})")
+                    
+                    if weth_balance >= token_amount:
+                        print(f"   Using WETH instead of {input_token_symbol}")
+                        input_token_address = WETH_BASE
+                        input_token_symbol = 'WETH'
+                        input_token_balance = weth_balance
+                        
+                        # IMPORTANT: Don't change the output token when using WETH fallback
+                        # This prevents swapping WETH for WETH
+                        if output_token_symbol == input_token_symbol:
+                            print(f"❌ Cannot swap {input_token_symbol} for {output_token_symbol}")
+                            print(f"   This would be an invalid swap")
+                            return False
+                    else:
+                        print(f"❌ Insufficient WETH balance: {weth_balance} < {token_amount}")
+                        print(f"   Need: ${POSITION_SIZE_USD}, Have: ${weth_balance_usd:.2f}")
+                        return False
+                
+                if input_token_balance < token_amount:
+                    print(f"❌ Insufficient {input_token_symbol} balance: {input_token_balance} < {token_amount}")
+                    print(f"   Need: ${POSITION_SIZE_USD}, Have: ${balance_usd:.2f}")
+                    return False
+                    
+            except Exception as e:
+                print(f"❌ Error checking {input_token_symbol} balance: {e}")
+                return False
+            
+            # Calculate amounts with slippage
+            amount_out_min = int(token_amount * (1 - MAX_SLIPPAGE))
+            
+            print(f"   Amount: {token_amount} wei")
+            print(f"   Min out: {amount_out_min} wei")
+            
+            # Execute arbitrage
+            success = self.execute_arbitrage_swaps(
+                opportunity['buy_dex'], 
+                opportunity['sell_dex'],
+                input_token_address,
+                output_token_address,
+                token_amount,
+                amount_out_min
+            )
+            
+            if success:
+                print("✅ Arbitrage executed successfully!")
                 return True
+            else:
+                print("❌ Arbitrage execution failed")
+                return False
                 
         except Exception as e:
             print(f"❌ Execution failed: {e}")
             return False
     
-    def build_arbitrage_transaction(self, opportunity, token_amount):
-        """Build the arbitrage transaction"""
-        # This is a simplified version - real implementation would be more complex
-        # involving flash loans, multiple swaps, etc.
-        
-        if not self.account:
-            raise ValueError("No account loaded")
+    def execute_arbitrage_swaps(self, buy_dex, sell_dex, token0, token1, amount, amount_out_min):
+        """Execute the actual arbitrage swaps"""
+        try:
+            # Step 1: Approve tokens for buy DEX
+            print(f"🔐 Approving tokens for {buy_dex}...")
+            if buy_dex == 'Uniswap':
+                if not self.approve_token(token0, UNISWAP_V3_ROUTER, amount):
+                    return False
+            elif buy_dex == 'SushiSwap':
+                if not self.approve_token(token0, SUSHI_ROUTER, amount):
+                    return False
+            else:
+                print(f"❌ Unsupported DEX: {buy_dex}")
+                return False
             
-        nonce = self.w3.eth.get_transaction_count(self.account.address)
-        gas_price = self.w3.eth.gas_price
+            # Step 2: Execute buy swap
+            print(f"🔄 Executing buy on {buy_dex}...")
+            try:
+                if buy_dex == 'Uniswap':
+                    if not self.execute_uniswap_swap(token0, token1, amount, amount_out_min):
+                        return False
+                elif buy_dex == 'SushiSwap':
+                    if not self.execute_sushiswap_swap(token0, token1, amount, amount_out_min):
+                        return False
+            except Exception as e:
+                print(f"❌ Buy swap failed on {buy_dex}: {e}")
+                return False
+            
+            # Step 3: Approve tokens for sell DEX
+            print(f"🔐 Approving tokens for {sell_dex}...")
+            if sell_dex == 'Uniswap':
+                if not self.approve_token(token1, UNISWAP_V3_ROUTER, amount_out_min):
+                    return False
+            elif sell_dex == 'SushiSwap':
+                if not self.approve_token(token1, SUSHI_ROUTER, amount_out_min):
+                    return False
+            else:
+                print(f"❌ Unsupported DEX: {sell_dex}")
+                return False
+            
+            # Step 4: Execute sell swap
+            print(f"🔄 Executing sell on {sell_dex}...")
+            try:
+                if sell_dex == 'Uniswap':
+                    if not self.execute_uniswap_swap(token1, token0, amount_out_min, amount):
+                        return False
+                elif sell_dex == 'SushiSwap':
+                    if not self.execute_sushiswap_swap(token1, token0, amount_out_min, amount):
+                        return False
+            except Exception as e:
+                print(f"❌ Sell swap failed on {sell_dex}: {e}")
+                return False
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ Swap execution failed: {e}")
+            return False
+    
+    def check_available_tokens(self):
+        """Check what tokens are available in the wallet"""
+        if not self.account:
+            print("❌ No account loaded")
+            return
         
-        # Build the transaction data
-        # This would involve complex contract interactions
-        tx_data = b''  # Placeholder
+        print(f"🔍 Checking available tokens for {self.account.address}...")
         
-        tx = {
-            'to': self.account.address,  # Self-destruct for flash loan
-            'value': 0,
-            'gas': 500000,
-            'gasPrice': gas_price,
-            'nonce': nonce,
-            'data': tx_data
+        # Common tokens to check
+        tokens_to_check = {
+            'WETH': WETH_BASE,
+            'USDC': USDC_BASE,
+            'weETH': weETH_BASE
         }
         
-        return tx
+        for symbol, address in tokens_to_check.items():
+            try:
+                balance = self.check_token_balance(address)
+                if balance > 0:
+                    print(f"   ✅ {symbol}: {balance} wei")
+                else:
+                    print(f"   ❌ {symbol}: 0 wei")
+            except Exception as e:
+                print(f"   ❌ {symbol}: Error - {e}")
 
 async def get_uniswap_prices():
     """Get all Uniswap v3 pool prices with enhanced monitoring"""
@@ -585,6 +927,7 @@ async def monitor():
     executor = ArbitrageExecutor(PRIVATE_KEY)
     
     print(f"🔧 Execution Mode: {'LIVE' if EXECUTION_MODE else 'SIMULATION'}")
+    print(f"📊 Simulation Mode: {'ENABLED' if SIMULATION_MODE else 'DISABLED'}")
     print(f"💰 Position Size: ${POSITION_SIZE_USD:,.0f}")
     print(f"📊 Profit Range: {MIN_PROFIT_PCT}%-{MAX_PROFIT_PCT}%")
     print(f"💧 Min Liquidity: ${MIN_LIQUIDITY_USD:,.0f}")
@@ -592,10 +935,20 @@ async def monitor():
     
     if SAFE_MODE:
         print(f"⚠️  SAFE TESTING MODE:")
-        print(f"   - Max position size: $100")
-        print(f"   - Max profit: 10%")
+        print(f"   - Max position size: $10")
+        print(f"   - Max profit: 20%")
         print(f"   - Only safe tokens allowed")
         print(f"   - Current position size: ${POSITION_SIZE_USD}")
+    
+    if SIMULATION_MODE:
+        print(f"🎮 SIMULATION MODE:")
+        print(f"   - No real transactions will be sent")
+        print(f"   - All operations will be simulated")
+        print(f"   - Safe for testing without risk")
+    
+    # Check available tokens first
+    if executor.account:
+        executor.check_available_tokens()
     
     first_trade = True
     
@@ -647,6 +1000,7 @@ async def monitor():
                         print(f"\n⚠️  FIRST TRADE CONFIRMATION:")
                         print(f"   This will execute a real trade with ${POSITION_SIZE_USD}")
                         print(f"   Max potential loss: ${POSITION_SIZE_USD * 0.05:.2f}")
+                        print(f"   Mode: {'SIMULATION' if SIMULATION_MODE else 'LIVE'}")
                         print(f"   Continue? (y/n): ", end="")
                         # For now, auto-continue but you can add input() here
                         print("AUTO-CONTINUING (remove this line to add manual confirmation)")
