@@ -1,14 +1,14 @@
-# Byte-compiled / optimized / DLL files
+# Environment variables
+.env
+.env.local
+.env.production
+
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
-
-# Distribution / packaging
 .Python
-env/
 build/
 develop-eggs/
 dist/
@@ -20,29 +20,67 @@ lib64/
 parts/
 sdist/
 var/
+wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
-# PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
-*.manifest
-*.spec
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
 
-# Installer logs
-debug.log
-pip-log.txt
-pip-delete-this-directory.txt
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
-# Unit test / coverage reports
+# Logs
+logs/
+*.log
+
+# Foundry
+cache/
+out/
+broadcast/
+
+# Node modules (if any)
+node_modules/
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# Private keys and secrets
+*.pem
+*.key
+private_key.txt
+secrets.txt
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Coverage reports
 htmlcov/
-.tox/
-.nox/
 .coverage
 .coverage.*
-.cache
-nosetests.xml
 coverage.xml
 *.cover
 .hypothesis/
@@ -54,15 +92,22 @@ coverage.xml
 # pyenv
 .python-version
 
-# dotenv
-.env
-.env.*
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
 
-# VS Code
-.vscode/
+# Rope project settings
+.ropeproject
 
-# Mac
-.DS_Store
+# mkdocs documentation
+/site
 
-# System
-Thumbs.db 
+# Pyre type checker
+.pyre/
+
+# Project specific
+contracts/lib/
+contracts/out/
+contracts/cache/
+contracts/broadcast/ 

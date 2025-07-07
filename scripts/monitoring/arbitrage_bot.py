@@ -3,6 +3,11 @@ import os
 import aiohttp
 from web3 import Web3
 from dotenv import load_dotenv
+import sys
+
+# Add project root to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 from config import PAIR_ABI, SUSHI_FACTORY_ABI, DEFAULT_ETH_AMOUNT, DEFAULT_GAS_ETH, DEFAULT_SLIPPAGE_PCT, USDC_ADDRESS, WETH_ADDRESS, ZORA_ADDRESS, SUSHI_FACTORY_ADDRESS, BASE_GAS_PRICE_GWEI, GAS_LIMIT_SWAP, GAS_LIMIT_APPROVE, TRANSACTION_FEE_PCT, SLIPPAGE_PCT, MEV_PROTECTION_COST_USD, MIN_PROFIT_THRESHOLD_USD
 
 load_dotenv()
@@ -18,10 +23,10 @@ SIMULATION_MODE = False  # Set to True to simulate without sending transactions
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")  # Your wallet private key
 MIN_LIQUIDITY_USD = 100000  # Increased to $100k liquidity for safety
 MAX_PROFIT_PCT = 20.0  # Reduced to 20% max profit for realistic opportunities
-MIN_PROFIT_PCT = 1.0  # Increased to 1% minimum for better opportunities
+MIN_PROFIT_PCT = 0.5  # Reduced to 0.5% minimum for better opportunities
 MAX_SLIPPAGE = 0.01  # Reduced to 1% slippage for safety
-POSITION_SIZE_USD = 5  # Reduced to $5 for safe testing with available balance
-SAFE_MODE = True  # Enable additional safety checks
+POSITION_SIZE_USD = 1  # Reduced to $1 for safe testing with available balance
+SAFE_MODE = False  # Disable safe mode to test flash loans
 
 w3 = Web3(Web3.HTTPProvider(WEB3_PROVIDER))
 
@@ -33,8 +38,38 @@ WETH = Web3.to_checksum_address(WETH_ADDRESS)
 AAVE_LENDING_POOL = "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5"
 AAVE_LENDING_POOL_ABI = [
     {"inputs":[{"internalType":"address","name":"asset","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"},{"internalType":"uint256","name":"interestRateMode","type":"uint256"},{"internalType":"uint16","name":"referralCode","type":"uint16"},{"internalType":"address","name":"onBehalfOf","type":"address"}],"name":"borrow","outputs":[],"stateMutability":"nonpayable","type":"function"},
-    {"inputs":[{"internalType":"address","name":"asset","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"},{"internalType":"uint256","name":"rateMode","type":"uint256"},{"internalType":"address","name":"onBehalfOf","type":"address"}],"name":"repay","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"nonpayable","type":"function"}
+    {"inputs":[{"internalType":"address","name":"asset","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"},{"internalType":"uint256","name":"rateMode","type":"uint256"},{"internalType":"address","name":"onBehalfOf","type":"address"}],"name":"repay","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"internalType":"address","name":"asset","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"},{"internalType":"address","name":"onBehalfOf","type":"address"},{"internalType":"uint16","name":"referralCode","type":"uint16"}],"name":"supply","outputs":[],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"internalType":"address","name":"asset","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"},{"internalType":"address","name":"to","type":"address"}],"name":"withdraw","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"internalType":"address","name":"receiverAddress","type":"address"},{"internalType":"address[]","name":"assets","type":"address[]"},{"internalType":"uint256[]","name":"amounts","type":"uint256[]"},{"internalType":"uint256[]","name":"interestRateModes","type":"uint256[]"},{"internalType":"address","name":"onBehalfOf","type":"address"},{"internalType":"bytes","name":"params","type":"bytes"},{"internalType":"uint16","name":"referralCode","type":"uint16"}],"name":"flashLoan","outputs":[],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"internalType":"address","name":"receiverAddress","type":"address"},{"internalType":"address","name":"asset","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"},{"internalType":"bytes","name":"params","type":"bytes"},{"internalType":"uint16","name":"referralCode","type":"uint16"}],"name":"flashLoan","outputs":[],"stateMutability":"nonpayable","type":"function"}
 ]
+
+# Flash loan receiver contract address (deploy this contract first)
+FLASH_LOAN_RECEIVER_ADDRESS = "0x95DD361C6e75A93C610f359bcAb5412050976ddb"
+
+# Flash loan receiver contract ABI
+FLASH_LOAN_RECEIVER_ABI = [
+    {"inputs":[{"internalType":"address","name":"asset","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"},{"internalType":"address","name":"tokenIn","type":"address"},{"internalType":"address","name":"tokenOut","type":"address"},{"internalType":"string","name":"buyDex","type":"string"},{"internalType":"string","name":"sellDex","type":"string"},{"internalType":"uint256","name":"buyAmount","type":"uint256"},{"internalType":"uint256","name":"sellAmount","type":"uint256"},{"internalType":"uint24","name":"buyFee","type":"uint24"},{"internalType":"uint24","name":"sellFee","type":"uint24"}],"name":"requestFlashLoan","outputs":[],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"internalType":"address","name":"token","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"withdrawToken","outputs":[],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[],"name":"withdrawETH","outputs":[],"stateMutability":"nonpayable","type":"function"}
+]
+
+# Flash loan settings
+FLASH_LOAN_ENABLED = True
+FLASH_LOAN_AMOUNT_USD = 1  # Reduced to $1 for testing
+FLASH_LOAN_FEE_PCT = 0.0009  # 0.09% flash loan fee
+FLASH_LOAN_MIN_PROFIT_USD = 0.1  # Reduced minimum profit for testing
+
+# For now, disable flash loans in safe mode
+if SAFE_MODE:
+    FLASH_LOAN_ENABLED = False
+    print("⚠️  Flash loans disabled in safe mode")
+    print("   - Flash loans require proper Aave integration")
+    print("   - Use regular arbitrage for safe testing")
+
+# Direct flash loan approach (no contract deployment needed)
+DIRECT_FLASH_LOAN = True  # Set to True for simpler approach
 
 # MEV Bot detection
 MEV_BOT_ADDRESSES = [
@@ -58,7 +93,7 @@ SUSHI_ROUTER_ABI = [
 # Token addresses for Base network
 WETH_BASE = "0x4200000000000000000000000000000000000006"
 USDC_BASE = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
-weETH_BASE = "0xd9aa30E1B4c60CAe79FC379ff651abACE84F5AA9"
+weETH_BASE = "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A"
 
 # ERC20 Token ABI for approvals
 ERC20_ABI = [
@@ -82,6 +117,21 @@ class ArbitrageExecutor:
         # Initialize contracts
         self.uniswap_router = w3.eth.contract(address=UNISWAP_V3_ROUTER, abi=UNISWAP_V3_ROUTER_ABI)
         self.sushi_router = w3.eth.contract(address=SUSHI_ROUTER, abi=SUSHI_ROUTER_ABI)
+        
+        # Initialize flash loan contracts
+        self.aave_lending_pool = w3.eth.contract(address=Web3.to_checksum_address(AAVE_LENDING_POOL), abi=AAVE_LENDING_POOL_ABI)
+        
+        # Initialize flash loan receiver contract
+        if FLASH_LOAN_RECEIVER_ADDRESS != "0x0000000000000000000000000000000000000000":
+            self.flash_loan_receiver = w3.eth.contract(
+                address=Web3.to_checksum_address(FLASH_LOAN_RECEIVER_ADDRESS), 
+                abi=FLASH_LOAN_RECEIVER_ABI
+            )
+            print(f"🔐 Flash loan receiver contract: {FLASH_LOAN_RECEIVER_ADDRESS}")
+        else:
+            self.flash_loan_receiver = None
+            print("⚠️  Flash loan receiver contract not deployed - flash loans disabled")
+            print("   Deploy flash_loan_receiver.sol first and set FLASH_LOAN_RECEIVER_ADDRESS")
         
     def validate_opportunity(self, opportunity):
         """Validate if an opportunity is realistic and executable"""
@@ -186,20 +236,19 @@ class ArbitrageExecutor:
         
         return True  # Already approved
     
-    def execute_uniswap_swap(self, token_in, token_out, amount_in, amount_out_min, fee=3000):
+    def execute_uniswap_swap(self, token_in, token_out, amount_in, amount_out_min, fee):
         """Execute swap on Uniswap V3"""
         if not self.account:
             raise ValueError("No account loaded")
-            
         # Get current block timestamp
         latest_block = self.w3.eth.get_block('latest')
         deadline = latest_block.get('timestamp', 0) + 300  # 5 minutes
-        
-        # Build swap parameters
+        # Ensure fee is uint24
+        fee_uint24 = int(fee) & 0xFFFFFF
         params = {
             'tokenIn': Web3.to_checksum_address(token_in),
             'tokenOut': Web3.to_checksum_address(token_out),
-            'fee': fee,
+            'fee': fee_uint24,
             'recipient': self.account.address,
             'deadline': deadline,
             'amountIn': amount_in,
@@ -238,7 +287,7 @@ class ArbitrageExecutor:
             print(f"📊 Simulation: Would swap {amount_in} tokens on Uniswap")
             return True
     
-    def execute_sushiswap_swap(self, token_in, token_out, amount_in, amount_out_min):
+    def execute_sushiswap_swap(self, token_in, token_out, amount_in, amount_out_min, fee=None):
         """Execute swap on SushiSwap"""
         if not self.account:
             raise ValueError("No account loaded")
@@ -286,6 +335,184 @@ class ArbitrageExecutor:
         else:
             print(f"📊 Simulation: Would swap {amount_in} tokens on SushiSwap")
             return True
+    
+    def execute_flash_loan_arbitrage(self, opportunity):
+        """Execute arbitrage using flash loans for capital efficiency"""
+        if not self.account:
+            print("❌ Cannot execute flash loan - no wallet loaded")
+            return False
+        
+        try:
+            print(f"🚀 Executing FLASH LOAN arbitrage: {opportunity['pair']}")
+            print(f"   Buy on {opportunity['buy_dex']} @ {opportunity['buy_price']:.6f}")
+            print(f"   Sell on {opportunity['sell_dex']} @ {opportunity['sell_price']:.6f}")
+            print(f"   Expected profit: {opportunity['profit_pct']:.2f}%")
+            print(f"   Flash loan amount: ${FLASH_LOAN_AMOUNT_USD:,.0f}")
+            
+            # Parse token addresses
+            pair_tokens = opportunity['pair'].split('/')
+            token0_symbol, token1_symbol = pair_tokens[0], pair_tokens[1]
+            
+            # Get token addresses
+            token_addresses = {
+                'WETH': WETH_BASE,
+                'USDC': USDC_BASE,
+                'weETH': weETH_BASE,
+                'USDT': USDC_BASE,
+                'cbBTC': WETH_BASE,
+                'cbETH': WETH_BASE,
+                'wstETH': WETH_BASE
+            }
+            
+            token0_address = token_addresses.get(token0_symbol, WETH_BASE)
+            token1_address = token_addresses.get(token1_symbol, WETH_BASE)
+            
+            # Determine which token to flash loan (usually the more liquid one)
+            flash_loan_token = token0_address if token0_symbol == 'WETH' else token1_address
+            flash_loan_symbol = token0_symbol if token0_symbol == 'WETH' else token1_symbol
+            
+            # Calculate flash loan amount in wei
+            eth_price_usd = 2500
+            flash_loan_amount_eth = FLASH_LOAN_AMOUNT_USD / eth_price_usd
+            flash_loan_amount_wei = int(flash_loan_amount_eth * 1e18)
+            
+            print(f"   Flash loan token: {flash_loan_symbol} ({flash_loan_token})")
+            print(f"   Flash loan amount: {flash_loan_amount_wei} wei (${FLASH_LOAN_AMOUNT_USD:,.0f})")
+            
+            # Execute flash loan arbitrage
+            success = self.execute_flash_loan_operation(
+                flash_loan_token,
+                flash_loan_amount_wei,
+                opportunity['buy_dex'],
+                opportunity['sell_dex'],
+                token0_address,
+                token1_address,
+                opportunity
+            )
+            
+            if success:
+                print("✅ Flash loan arbitrage executed successfully!")
+                return True
+            else:
+                print("❌ Flash loan arbitrage failed")
+                return False
+                
+        except Exception as e:
+            print(f"❌ Flash loan execution failed: {e}")
+            return False
+    
+    def execute_flash_loan_operation(self, flash_loan_token, flash_loan_amount, buy_dex, sell_dex, token0, token1, opportunity=None):
+        """Execute the flash loan operation with arbitrage"""
+        if not self.account:
+            print("❌ Cannot execute flash loan - no wallet loaded")
+            return False
+        if not self.flash_loan_receiver:
+            print("❌ Flash loan receiver contract not deployed")
+            print("   Deploy flash_loan_receiver.sol first and set FLASH_LOAN_RECEIVER_ADDRESS")
+            return False
+        try:
+            print(f"🔐 Initiating flash loan for {flash_loan_amount} wei...")
+            print(f"   Using contract-based flash loan (atomic execution)")
+            # Step 1: Request flash loan through the receiver contract
+            if not SIMULATION_MODE:
+                # Calculate amounts for arbitrage
+                amount_out_min = int(flash_loan_amount * (1 - MAX_SLIPPAGE))
+                # Determine buyFee and sellFee (uint24)
+                buyFee = 3000
+                sellFee = 3000
+                if opportunity:
+                    if buy_dex == 'Uniswap':
+                        buyFee = int(opportunity.get('uniswap_fee_tier', 3000))
+                    elif buy_dex == 'SushiSwap':
+                        buyFee = int(opportunity.get('sushiswap_fee_tier', 3000))
+                    elif buy_dex == 'Aerodrome':
+                        buyFee = int(opportunity.get('aerodrome_fee_tier', 3000))
+                    if sell_dex == 'Uniswap':
+                        sellFee = int(opportunity.get('uniswap_fee_tier', 3000))
+                    elif sell_dex == 'SushiSwap':
+                        sellFee = int(opportunity.get('sushiswap_fee_tier', 3000))
+                    elif sell_dex == 'Aerodrome':
+                        sellFee = int(opportunity.get('aerodrome_fee_tier', 3000))
+                # Build flash loan request transaction
+                flash_loan_function = self.flash_loan_receiver.functions.requestFlashLoan(
+                    flash_loan_token,      # asset to flash loan
+                    flash_loan_amount,     # amount to borrow
+                    token0,                # tokenIn for arbitrage
+                    token1,                # tokenOut for arbitrage
+                    buy_dex,               # buyDex
+                    sell_dex,              # sellDex
+                    flash_loan_amount,     # buyAmount
+                    amount_out_min,        # sellAmount
+                    buyFee,                # buyFee (uint24)
+                    sellFee                # sellFee (uint24)
+                )
+                nonce = self.w3.eth.get_transaction_count(self.account.address)
+                gas_price = self.w3.eth.gas_price
+                tx = flash_loan_function.build_transaction({
+                    'from': self.account.address,
+                    'gas': 1000000,  # Higher gas for flash loan
+                    'gasPrice': gas_price,
+                    'nonce': nonce
+                })
+                # Sign and send flash loan
+                signed_tx = self.account.sign_transaction(tx)
+                tx_hash = self.w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+                print(f"✅ Flash loan requested: {tx_hash.hex()}")
+                # Wait for flash loan confirmation
+                receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+                if receipt["status"] != 1:
+                    print("❌ Flash loan failed")
+                    print("   This might be because:")
+                    print("   - Flash loan receiver contract not deployed")
+                    print("   - Insufficient liquidity in Aave pool")
+                    print("   - Flash loan not supported for this token")
+                    print("   - Arbitrage execution failed in contract")
+                    return False
+                print("✅ Flash loan executed successfully!")
+                # Step 2: Check if we have profit in the receiver contract
+                try:
+                    # Check token balance in receiver contract
+                    token_contract = self.get_token_contract(flash_loan_token)
+                    receiver_balance = token_contract.functions.balanceOf(FLASH_LOAN_RECEIVER_ADDRESS).call()
+                    if receiver_balance > 0:
+                        print(f"💰 Profit detected in receiver contract: {receiver_balance} wei")
+                        # Withdraw profit from receiver contract
+                        withdraw_function = self.flash_loan_receiver.functions.withdrawToken(
+                            flash_loan_token,
+                            receiver_balance
+                        )
+                        nonce = self.w3.eth.get_transaction_count(self.account.address)
+                        gas_price = self.w3.eth.gas_price
+                        tx = withdraw_function.build_transaction({
+                            'from': self.account.address,
+                            'gas': 100000,
+                            'gasPrice': gas_price,
+                            'nonce': nonce
+                        })
+                        signed_tx = self.account.sign_transaction(tx)
+                        tx_hash = self.w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+                        print(f"✅ Profit withdrawal sent: {tx_hash.hex()}")
+                        receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+                        if receipt["status"] == 1:
+                            print("✅ Profit withdrawn successfully!")
+                        else:
+                            print("❌ Profit withdrawal failed")
+                    else:
+                        print("⚠️  No profit detected in receiver contract")
+                except Exception as e:
+                    print(f"⚠️  Could not check/withdraw profit: {e}")
+                return True
+            else:
+                print(f"📊 Simulation: Would execute flash loan for {flash_loan_amount} wei")
+                print(f"   Would buy on {buy_dex}")
+                print(f"   Would sell on {sell_dex}")
+                print(f"   Would repay flash loan automatically")
+                return True
+        except Exception as e:
+            print(f"❌ Flash loan operation failed: {e}")
+            print("   Note: Flash loans require a deployed receiver contract")
+            print("   with executeOperation() callback implementation")
+            return False
     
     def execute_arbitrage(self, opportunity):
         """Execute the arbitrage trade"""
@@ -421,7 +648,8 @@ class ArbitrageExecutor:
                 input_token_address,
                 output_token_address,
                 token_amount,
-                amount_out_min
+                amount_out_min,
+                opportunity=opportunity
             )
             
             if success:
@@ -435,7 +663,7 @@ class ArbitrageExecutor:
             print(f"❌ Execution failed: {e}")
             return False
     
-    def execute_arbitrage_swaps(self, buy_dex, sell_dex, token0, token1, amount, amount_out_min):
+    def execute_arbitrage_swaps(self, buy_dex, sell_dex, token0, token1, amount, amount_out_min, opportunity=None):
         """Execute the actual arbitrage swaps"""
         try:
             # Step 1: Approve tokens for buy DEX
@@ -446,6 +674,9 @@ class ArbitrageExecutor:
             elif buy_dex == 'SushiSwap':
                 if not self.approve_token(token0, SUSHI_ROUTER, amount):
                     return False
+            elif buy_dex == 'Aerodrome':
+                # Add approval logic if needed for Aerodrome
+                pass
             else:
                 print(f"❌ Unsupported DEX: {buy_dex}")
                 return False
@@ -454,10 +685,16 @@ class ArbitrageExecutor:
             print(f"🔄 Executing buy on {buy_dex}...")
             try:
                 if buy_dex == 'Uniswap':
-                    if not self.execute_uniswap_swap(token0, token1, amount, amount_out_min):
+                    fee = opportunity['uniswap_fee_tier'] if opportunity and 'uniswap_fee_tier' in opportunity else 3000
+                    if not self.execute_uniswap_swap(token0, token1, amount, amount_out_min, fee):
                         return False
                 elif buy_dex == 'SushiSwap':
-                    if not self.execute_sushiswap_swap(token0, token1, amount, amount_out_min):
+                    fee = opportunity['sushiswap_fee_tier'] if opportunity and 'sushiswap_fee_tier' in opportunity else None
+                    if not self.execute_sushiswap_swap(token0, token1, amount, amount_out_min, fee):
+                        return False
+                elif buy_dex == 'Aerodrome':
+                    fee = opportunity['aerodrome_fee_tier'] if opportunity and 'aerodrome_fee_tier' in opportunity else None
+                    if not self.execute_aerodrome_swap(token0, token1, amount, amount_out_min, fee):
                         return False
             except Exception as e:
                 print(f"❌ Buy swap failed on {buy_dex}: {e}")
@@ -471,6 +708,9 @@ class ArbitrageExecutor:
             elif sell_dex == 'SushiSwap':
                 if not self.approve_token(token1, SUSHI_ROUTER, amount_out_min):
                     return False
+            elif sell_dex == 'Aerodrome':
+                # Add approval logic if needed for Aerodrome
+                pass
             else:
                 print(f"❌ Unsupported DEX: {sell_dex}")
                 return False
@@ -479,10 +719,16 @@ class ArbitrageExecutor:
             print(f"🔄 Executing sell on {sell_dex}...")
             try:
                 if sell_dex == 'Uniswap':
-                    if not self.execute_uniswap_swap(token1, token0, amount_out_min, amount):
+                    fee = opportunity['uniswap_fee_tier'] if opportunity and 'uniswap_fee_tier' in opportunity else 3000
+                    if not self.execute_uniswap_swap(token1, token0, amount_out_min, amount, fee):
                         return False
                 elif sell_dex == 'SushiSwap':
-                    if not self.execute_sushiswap_swap(token1, token0, amount_out_min, amount):
+                    fee = opportunity['sushiswap_fee_tier'] if opportunity and 'sushiswap_fee_tier' in opportunity else None
+                    if not self.execute_sushiswap_swap(token1, token0, amount_out_min, amount, fee):
+                        return False
+                elif sell_dex == 'Aerodrome':
+                    fee = opportunity['aerodrome_fee_tier'] if opportunity and 'aerodrome_fee_tier' in opportunity else None
+                    if not self.execute_aerodrome_swap(token1, token0, amount_out_min, amount, fee):
                         return False
             except Exception as e:
                 print(f"❌ Sell swap failed on {sell_dex}: {e}")
@@ -518,6 +764,11 @@ class ArbitrageExecutor:
                     print(f"   ❌ {symbol}: 0 wei")
             except Exception as e:
                 print(f"   ❌ {symbol}: Error - {e}")
+
+    def execute_aerodrome_swap(self, token_in, token_out, amount_in, amount_out_min, fee=None):
+        """Execute swap on Aerodrome (stub, implement as needed)"""
+        print(f"Aerodrome swap: {token_in}->{token_out}, amount: {amount_in}, min_out: {amount_out_min}, fee: {fee}")
+        return True  # Implement actual logic as needed
 
 async def get_uniswap_prices():
     """Get all Uniswap v3 pool prices with enhanced monitoring"""
@@ -700,7 +951,8 @@ async def get_sushiswap_prices():
                             'pair_address': pair_addr,
                             'token0': token0,
                             'token1': token1,
-                            'liquidity_usd': total_liquidity_usd
+                            'liquidity_usd': total_liquidity_usd,
+                            'fee_tier': None  # SushiSwap V2 does not have fee tiers, but keep for consistency
                         }
                         
             except Exception as e:
@@ -779,7 +1031,8 @@ async def get_aerodrome_prices():
                                 'volume': volume,
                                 'pool_id': pair['id'],
                                 'token0': t0['id'],
-                                'token1': t1['id']
+                                'token1': t1['id'],
+                                'fee_tier': None  # Aerodrome does not use fee tiers, but keep for consistency
                             }
                             processed_count += 1
                     except Exception as e:
@@ -855,7 +1108,10 @@ def find_arbitrage_opportunities(uniswap_prices, sushiswap_prices, aerodrome_pri
                             'sell_price': max_price,
                             'profit_pct': profit_pct,
                             'profit_analysis': profit_analysis,
-                            'strategy': 'flash_loan' if profit_analysis['flash_loan_profit'] > profit_analysis['regular_profit'] else 'regular'
+                            'strategy': 'flash_loan' if profit_analysis['flash_loan_profit'] > profit_analysis['regular_profit'] else 'regular',
+                            'uniswap_fee_tier': uniswap_prices[pair]['fee_tier'] if pair in uniswap_prices else None,
+                            'sushiswap_fee_tier': sushiswap_prices[pair]['fee_tier'] if pair in sushiswap_prices else None,
+                            'aerodrome_fee_tier': aerodrome_prices[pair]['fee_tier'] if pair in aerodrome_prices else None,
                         })
     
     return sorted(opportunities, key=lambda x: x['profit_analysis']['net_profit_usd'], reverse=True)
@@ -922,7 +1178,7 @@ def estimate_profit(buy_price, sell_price, eth_amount=DEFAULT_ETH_AMOUNT, eth_pr
     }
 
 async def monitor():
-    """Enhanced monitoring loop with real-time execution capabilities"""
+    """Enhanced monitoring loop with real-time execution capabilities - RUN ONCE VERSION"""
     # Initialize executor
     executor = ArbitrageExecutor(PRIVATE_KEY)
     
@@ -932,6 +1188,7 @@ async def monitor():
     print(f"📊 Profit Range: {MIN_PROFIT_PCT}%-{MAX_PROFIT_PCT}%")
     print(f"💧 Min Liquidity: ${MIN_LIQUIDITY_USD:,.0f}")
     print(f"🛡️  Safe Mode: {'ENABLED' if SAFE_MODE else 'DISABLED'}")
+    print(f"🚀 Flash Loan Enabled: {'YES' if FLASH_LOAN_ENABLED else 'NO'}")
     
     if SAFE_MODE:
         print(f"⚠️  SAFE TESTING MODE:")
@@ -950,74 +1207,87 @@ async def monitor():
     if executor.account:
         executor.check_available_tokens()
     
-    first_trade = True
+    print("\n" + "="*60)
+    print("🚀 Testing Flash Loan Arbitrage Bot - Single Run")
+    print("="*60)
     
-    while True:
-        print("\n" + "="*60)
-        print("🚀 Real-Time Arbitrage Bot - Safe Testing Mode")
-        print("="*60)
+    # Get prices from all DEXes
+    print("📊 Fetching prices from DEXes...")
+    uniswap_prices = await get_uniswap_prices()
+    sushiswap_prices = await get_sushiswap_prices()
+    aerodrome_prices = await get_aerodrome_prices()
+    
+    print(f"📊 Found {len(uniswap_prices)} Uniswap pools")
+    print(f"📊 Found {len(sushiswap_prices)} SushiSwap pools")
+    print(f"📊 Found {len(aerodrome_prices)} Aerodrome pools")
+    
+    # Find arbitrage opportunities
+    print("🔍 Analyzing arbitrage opportunities...")
+    opportunities = find_arbitrage_opportunities(uniswap_prices, sushiswap_prices, aerodrome_prices)
+    
+    if opportunities:
+        print(f"\n🔥 Found {len(opportunities)} executable arbitrage opportunities:")
+        print("-" * 80)
         
-        # Get prices from all DEXes
-        uniswap_prices = await get_uniswap_prices()
-        sushiswap_prices = await get_sushiswap_prices()
-        aerodrome_prices = await get_aerodrome_prices()
-        
-        print(f"📊 Found {len(uniswap_prices)} Uniswap pools")
-        print(f"📊 Found {len(sushiswap_prices)} SushiSwap pools")
-        print(f"📊 Found {len(aerodrome_prices)} Aerodrome pools")
-        
-        # Find arbitrage opportunities
-        opportunities = find_arbitrage_opportunities(uniswap_prices, sushiswap_prices, aerodrome_prices)
-        
-        if opportunities:
-            print(f"\n🔥 Found {len(opportunities)} executable arbitrage opportunities:")
-            print("-" * 80)
+        for i, opp in enumerate(opportunities[:5]):  # Show top 5
+            analysis = opp['profit_analysis']
+            strategy = opp.get('strategy', 'regular')
             
-            for i, opp in enumerate(opportunities[:5]):  # Show top 5
-                analysis = opp['profit_analysis']
-                strategy = opp.get('strategy', 'regular')
+            print(f"{i+1}. {opp['pair']} ({strategy.upper()})")
+            print(f"   Buy on {opp['buy_dex']} @ {opp['buy_price']:.6f}")
+            print(f"   Sell on {opp['sell_dex']} @ {opp['sell_price']:.6f}")
+            print(f"   Profit: {opp['profit_pct']:.2f}%")
+            
+            if strategy == 'flash_loan':
+                print(f"   Flash Loan Profit: ${analysis['flash_loan_profit']:.2f}")
+                print(f"   Flash Loan Amount: ${analysis['flash_loan_amount_usd']:,.0f}")
+                print(f"   Flash Loan Fee: ${analysis['flash_loan_fee']:.2f}")
+            else:
+                print(f"   Regular Profit: ${analysis['regular_profit']:.2f}")
+            
+            print(f"   Net Profit: ${analysis['net_profit_usd']:.2f}")
+            
+            # Execute the best opportunity
+            if i == 0 and EXECUTION_MODE:
+                print(f"\n🎯 Executing best opportunity: {opp['pair']}")
+                print(f"   Strategy: {strategy.upper()}")
                 
-                print(f"{i+1}. {opp['pair']} ({strategy.upper()})")
-                print(f"   Buy on {opp['buy_dex']} @ {opp['buy_price']:.6f}")
-                print(f"   Sell on {opp['sell_dex']} @ {opp['sell_price']:.6f}")
-                print(f"   Profit: {opp['profit_pct']:.2f}%")
-                
-                if strategy == 'flash_loan':
-                    print(f"   Flash Loan Profit: ${analysis['flash_loan_profit']:.2f}")
-                    print(f"   Flash Loan Amount: ${analysis['flash_loan_amount_usd']:,.0f}")
-                    print(f"   Flash Loan Fee: ${analysis['flash_loan_fee']:.2f}")
+                # Choose execution method based on strategy and safety settings
+                if opp.get('strategy') == 'flash_loan' and FLASH_LOAN_ENABLED:
+                    # Use flash loan for better opportunities
+                    print(f"🚀 Using FLASH LOAN strategy for {opp['pair']}")
+                    print(f"   Flash loan amount: ${FLASH_LOAN_AMOUNT_USD:,.0f}")
+                    print(f"   Flash loan fee: {FLASH_LOAN_FEE_PCT*100:.3f}%")
+                    print(f"   Contract address: {FLASH_LOAN_RECEIVER_ADDRESS}")
+                    
+                    success = executor.execute_flash_loan_arbitrage(opp)
+                    
+                    # If flash loan fails, do NOT try regular arbitrage as fallback
+                    if not success:
+                        print(f"❌ Flash loan arbitrage failed. Not attempting regular arbitrage fallback.")
                 else:
-                    print(f"   Regular Profit: ${analysis['regular_profit']:.2f}")
-                
-                print(f"   Net Profit: ${analysis['net_profit_usd']:.2f}")
-                
-                # Execute the best opportunity
-                if i == 0 and EXECUTION_MODE:
-                    print(f"\n🎯 Executing best opportunity: {opp['pair']}")
-                    
-                    # Safety confirmation for first trade
-                    if first_trade and SAFE_MODE:
-                        print(f"\n⚠️  FIRST TRADE CONFIRMATION:")
-                        print(f"   This will execute a real trade with ${POSITION_SIZE_USD}")
-                        print(f"   Max potential loss: ${POSITION_SIZE_USD * 0.05:.2f}")
-                        print(f"   Mode: {'SIMULATION' if SIMULATION_MODE else 'LIVE'}")
-                        print(f"   Continue? (y/n): ", end="")
-                        # For now, auto-continue but you can add input() here
-                        print("AUTO-CONTINUING (remove this line to add manual confirmation)")
-                    
+                    # Use regular arbitrage for safe testing
+                    print(f"💰 Using REGULAR arbitrage for {opp['pair']}")
                     success = executor.execute_arbitrage(opp)
-                    if success:
-                        print("✅ Arbitrage executed successfully!")
-                        first_trade = False
-                    else:
-                        print("❌ Arbitrage execution failed")
                 
-                print()
+                if success:
+                    print("✅ Arbitrage executed successfully!")
+                else:
+                    print("❌ Arbitrage execution failed")
+                
+                # Only execute one opportunity and exit
+                break
         else:
-            print("❌ No executable arbitrage opportunities found")
-        
-        print(f"⏰ Next scan in 15 seconds...")
-        await asyncio.sleep(15)
+            print("❌ No executable opportunities found or execution disabled")
+    else:
+        print("❌ No executable arbitrage opportunities found")
+    
+    print("\n🏁 Test run completed!")
+    print("📊 Summary:")
+    print(f"   - Opportunities found: {len(opportunities)}")
+    print(f"   - Flash loan enabled: {FLASH_LOAN_ENABLED}")
+    print(f"   - Execution mode: {'LIVE' if EXECUTION_MODE else 'SIMULATION'}")
+    print(f"   - Safe mode: {SAFE_MODE}")
 
 if __name__ == "__main__":
     asyncio.run(monitor())
