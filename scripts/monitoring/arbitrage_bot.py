@@ -18,16 +18,16 @@ AERODROME_SUBGRAPH = os.getenv("AERODROME_SUBGRAPH")
 UNISWAP_API_KEY = os.getenv("UNISWAP_API_KEY")
 
 # Real-time execution settings
-EXECUTION_MODE = True  # Set to True for live trading
-SIMULATION_MODE = False  # Set to True to simulate without sending transactions
+EXECUTION_MODE = False  # DISABLED - Set to False for safety
+SIMULATION_MODE = True   # ENABLED - Set to True for simulation only
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")  # Your wallet private key
 MIN_LIQUIDITY_USD = 100000  # Increased to $100k liquidity for safety
 MAX_PROFIT_PCT = 20.0  # Reduced to 20% max profit for realistic opportunities
 MIN_PROFIT_PCT = 0.1  # Lowered to 0.1% minimum for better opportunities
 MAX_SLIPPAGE = 0.02  # Increased to 2% slippage for testing
 # Update position size for testing
-POSITION_SIZE_USD = 1.5  # $1.5 for testing
-SAFE_MODE = False  # Disable safe mode to test flash loans
+POSITION_SIZE_USD = 1.0  # REDUCED to $1 for safety - NO LIVE TRADING
+SAFE_MODE = True  # ENABLE safe mode to prevent losses
 
 w3 = Web3(Web3.HTTPProvider(WEB3_PROVIDER))
 
@@ -1013,6 +1013,87 @@ class ArbitrageExecutor:
             print(f"📊 Simulation: Would swap {amount_in} tokens on Aerodrome")
             return True
 
+    def convert_eth_to_weth(self, amount_wei):
+        """Convert ETH to WETH using the WETH contract"""
+        if not self.account:
+            raise ValueError("No account loaded")
+            
+        # WETH contract address on Base
+        weth_address = Web3.to_checksum_address("0x4200000000000000000000000000000000000006")
+        
+        # WETH contract ABI (minimal for deposit)
+        weth_abi = [
+            {"inputs":[],"name":"deposit","outputs":[],"stateMutability":"payable","type":"function"},
+            {"inputs":[{"internalType":"uint256","name":"wad","type":"uint256"}],"name":"withdraw","outputs":[],"stateMutability":"nonpayable","type":"function"}
+        ]
+        
+        weth_contract = self.w3.eth.contract(address=weth_address, abi=weth_abi)
+        
+        # Check ETH balance
+        eth_balance = self.w3.eth.get_balance(self.account.address)
+        if eth_balance < amount_wei:
+            raise ValueError(f"Insufficient ETH balance: {eth_balance} < {amount_wei}")
+        
+        print(f"🔄 Converting {amount_wei / 1e18:.6f} ETH to WETH...")
+        
+        # Build deposit transaction
+        deposit_function = weth_contract.functions.deposit()
+        
+        nonce = self.w3.eth.get_transaction_count(self.account.address)
+        gas_price = self.w3.eth.gas_price
+        
+        tx = deposit_function.build_transaction({
+            'from': self.account.address,
+            'value': amount_wei,  # Send ETH with the transaction
+            'gas': 100000,
+            'gasPrice': gas_price,
+            'nonce': nonce
+        })
+        
+        if not SIMULATION_MODE:
+            # Sign and send conversion
+            signed_tx = self.account.sign_transaction(tx)
+            tx_hash = self.w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+            print(f"✅ ETH→WETH conversion sent: {tx_hash.hex()}")
+            
+            # Wait for confirmation
+            receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+            if receipt["status"] == 1:
+                print(f"✅ ETH→WETH conversion confirmed!")
+                return True
+            else:
+                print("❌ ETH→WETH conversion failed")
+                return False
+        else:
+            print(f"📊 Simulation: Would convert {amount_wei / 1e18:.6f} ETH to WETH")
+            return True
+
+    def ensure_sufficient_weth(self, required_amount_wei):
+        """Ensure we have sufficient WETH, convert ETH if needed"""
+        try:
+            # Check current WETH balance
+            weth_balance = self.check_token_balance(WETH_BASE)
+            
+            if weth_balance >= required_amount_wei:
+                print(f"✅ Sufficient WETH balance: {weth_balance / 1e18:.6f} WETH")
+                return True
+            
+            # Calculate how much ETH we need to convert
+            eth_needed = required_amount_wei - weth_balance
+            if eth_needed <= 0:
+                return True  # We have enough WETH
+                
+            print(f"❌ Insufficient WETH: {weth_balance / 1e18:.6f} WETH")
+            print(f"   Need: {required_amount_wei / 1e18:.6f} WETH")
+            print(f"   Converting: {eth_needed / 1e18:.6f} ETH to WETH")
+            
+            # Convert ETH to WETH
+            return self.convert_eth_to_weth(eth_needed)
+            
+        except Exception as e:
+            print(f"❌ Error ensuring sufficient WETH: {e}")
+            return False
+
 async def get_uniswap_prices():
     """Get all Uniswap v3 pool prices with enhanced monitoring"""
     if not UNISWAP_V3_SUBGRAPH:
@@ -1406,13 +1487,10 @@ def check_and_convert_eth_if_needed(executor, input_token_address, input_token_s
             print(f"   ❌ Insufficient ETH balance for conversion")
             return False
         
-        # For now, we'll use WETH as the intermediate token
-        # Convert ETH to WETH first, then to the target token if needed
+        # For WETH, use the new conversion method
         if input_token_symbol == 'WETH':
             print(f"   Converting ETH to WETH...")
-            # This would require implementing ETH→WETH conversion
-            # For now, let's assume we have WETH and focus on the arbitrage logic
-            return False
+            return executor.ensure_sufficient_weth(required_amount)
         else:
             print(f"   Need to implement ETH→{input_token_symbol} conversion")
             return False

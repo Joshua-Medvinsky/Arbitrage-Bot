@@ -23,7 +23,3 @@ runs = 1000
 runs = 1000
 depth = 15
 fail_on_revert = false
-
-# Deployment settings
-[profile.default.env]
-PRIVATE_KEY = "7c47c34b49ffb2a91eaf29f3cee14ee85c5973ca3fa86f1ec67f0fbd75448b64" 

@@ -299,10 +299,7 @@ jobs:
 
 **⚠️ Important**: These tests are for development and testing purposes. Always conduct thorough testing on testnets before deploying to mainnet. 
 
-You can now run:
+
 ```sh
 forge test
 ```
-to run your tests, or continue with your development workflow.
-
-If you hit any more errors, just let me know! 
