@@ -4,11 +4,13 @@ import aiohttp
 from web3 import Web3
 from dotenv import load_dotenv
 import sys
+import time
 
 # Add project root to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from config import PAIR_ABI, SUSHI_FACTORY_ABI, DEFAULT_ETH_AMOUNT, DEFAULT_GAS_ETH, DEFAULT_SLIPPAGE_PCT, USDC_ADDRESS, WETH_ADDRESS, ZORA_ADDRESS, SUSHI_FACTORY_ADDRESS, BASE_GAS_PRICE_GWEI, GAS_LIMIT_SWAP, GAS_LIMIT_APPROVE, TRANSACTION_FEE_PCT, SLIPPAGE_PCT, MEV_PROTECTION_COST_USD, MIN_PROFIT_THRESHOLD_USD
+from config import PAIR_ABI, SUSHI_FACTORY_ABI, DEFAULT_ETH_AMOUNT, DEFAULT_GAS_ETH, DEFAULT_SLIPPAGE_PCT, USDC_ADDRESS, WETH_ADDRESS, ZORA_ADDRESS, SUSHI_FACTORY_ADDRESS, BASE_GAS_PRICE_GWEI, GAS_LIMIT_SWAP, GAS_LIMIT_APPROVE, TRANSACTION_FEE_PCT, SLIPPAGE_PCT, MEV_PROTECTION_COST_USD, MIN_PROFIT_THRESHOLD_USD, SAFE_MODE, POSITION_SIZE_USD, FLASH_LOAN_ENABLED
+from scripts.monitoring.token_addresses import TOKEN_ADDRESSES, WETH_BASE, USDC_BASE, weETH_BASE
 
 load_dotenv()
 
@@ -22,12 +24,9 @@ EXECUTION_MODE = True  # DISABLED - Set to False for safety
 SIMULATION_MODE = False   # ENABLED - Set to True for simulation only
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")  # Your wallet private key
 MIN_LIQUIDITY_USD = 100000  # Increased to $100k liquidity for safety
-MAX_PROFIT_PCT = 75.0  # Reduced to 20% max profit for realistic opportunities
-MIN_PROFIT_PCT = 0.1  # Lowered to 0.1% minimum for better opportunities
+MAX_PROFIT_PCT = 300.0  # Reduced to 20% max profit for realistic opportunities
+MIN_PROFIT_PCT = 5  # Lowered to 0.1% minimum for better opportunities
 MAX_SLIPPAGE = 0.02  # Increased to 2% slippage for testing
-# Update position size for testing
-POSITION_SIZE_USD = 10.0  # Set to $10 for live run
-SAFE_MODE = True  # ENABLE safe mode to prevent losses
 
 w3 = Web3(Web3.HTTPProvider(WEB3_PROVIDER))
 
@@ -62,13 +61,6 @@ FLASH_LOAN_AMOUNT_USD = 1  # Reduced to $1 for testing
 FLASH_LOAN_FEE_PCT = 0.0009  # 0.09% flash loan fee
 FLASH_LOAN_MIN_PROFIT_USD = 0.1  # Reduced minimum profit for testing
 
-# For now, disable flash loans in safe mode
-if SAFE_MODE:
-    FLASH_LOAN_ENABLED = False
-    print("⚠️  Flash loans disabled in safe mode")
-    print("   - Flash loans require proper Aave integration")
-    print("   - Use regular arbitrage for safe testing")
-
 # Direct flash loan approach (no contract deployment needed)
 DIRECT_FLASH_LOAN = True  # Set to True for simpler approach
 
@@ -87,52 +79,35 @@ UNISWAP_V3_ROUTER_ABI = [
     {"inputs":[{"internalType":"bytes[]","name":"data","type":"bytes[]"}],"name":"multicall","outputs":[{"internalType":"bytes[]","name":"results","type":"bytes[]"}],"stateMutability":"payable","type":"function"}
 ]
 
-# SushiSwap Router for execution (Base network)
-SUSHI_ROUTER = Web3.to_checksum_address("0x6B3595068778DD592e39A122f4f5a5cF09C90fE2")
-SUSHI_ROUTER_ABI = [
+# SushiSwap router address and ABI
+SUSHISWAP_ROUTER = '0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F'
+SUSHISWAP_ROUTER_ABI = [
+    {"inputs":[{"internalType":"address","name":"_factory","type":"address"},{"internalType":"address","name":"_WETH","type":"address"}],"stateMutability":"nonpayable","type":"constructor"},
+    {"inputs":[],"name":"WETH","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},
+    {"inputs":[{"internalType":"address","name":"tokenA","type":"address"},{"internalType":"address","name":"tokenB","type":"address"},{"internalType":"uint256","name":"amountADesired","type":"uint256"},{"internalType":"uint256","name":"amountBDesired","type":"uint256"},{"internalType":"uint256","name":"amountAMin","type":"uint256"},{"internalType":"uint256","name":"amountBMin","type":"uint256"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"addLiquidity","outputs":[{"internalType":"uint256","name":"amountA","type":"uint256"},{"internalType":"uint256","name":"amountB","type":"uint256"},{"internalType":"uint256","name":"liquidity","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"internalType":"address","name":"token","type":"address"},{"internalType":"uint256","name":"amountTokenDesired","type":"uint256"},{"internalType":"uint256","name":"amountTokenMin","type":"uint256"},{"internalType":"uint256","name":"amountETHMin","type":"uint256"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"addLiquidityETH","outputs":[{"internalType":"uint256","name":"amountToken","type":"uint256"},{"internalType":"uint256","name":"amountETH","type":"uint256"},{"internalType":"uint256","name":"liquidity","type":"uint256"}],"stateMutability":"payable","type":"function"},
+    {"inputs":[],"name":"factory","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},
+    {"inputs":[{"internalType":"uint256","name":"amountOut","type":"uint256"},{"internalType":"uint256","name":"reserveIn","type":"uint256"},{"internalType":"uint256","name":"reserveOut","type":"uint256"}],"name":"getAmountIn","outputs":[{"internalType":"uint256","name":"amountIn","type":"uint256"}],"stateMutability":"pure","type":"function"},
+    {"inputs":[{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"reserveIn","type":"uint256"},{"internalType":"uint256","name":"reserveOut","type":"uint256"}],"name":"getAmountOut","outputs":[{"internalType":"uint256","name":"amountOut","type":"uint256"}],"stateMutability":"pure","type":"function"},
+    {"inputs":[{"internalType":"uint256","name":"amountOut","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"}],"name":"getAmountsIn","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"view","type":"function"},
+    {"inputs":[{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"}],"name":"getAmountsOut","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"view","type":"function"},
+    {"inputs":[{"internalType":"uint256","name":"amountA","type":"uint256"},{"internalType":"uint256","name":"reserveA","type":"uint256"},{"internalType":"uint256","name":"reserveB","type":"uint256"}],"name":"quote","outputs":[{"internalType":"uint256","name":"amountB","type":"uint256"}],"stateMutability":"pure","type":"function"},
+    {"inputs":[{"internalType":"address","name":"tokenA","type":"address"},{"internalType":"address","name":"tokenB","type":"address"},{"internalType":"uint256","name":"liquidity","type":"uint256"},{"internalType":"uint256","name":"amountAMin","type":"uint256"},{"internalType":"uint256","name":"amountBMin","type":"uint256"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"removeLiquidity","outputs":[{"internalType":"uint256","name":"amountA","type":"uint256"},{"internalType":"uint256","name":"amountB","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"internalType":"address","name":"token","type":"address"},{"internalType":"uint256","name":"liquidity","type":"uint256"},{"internalType":"uint256","name":"amountTokenMin","type":"uint256"},{"internalType":"uint256","name":"amountETHMin","type":"uint256"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"removeLiquidityETH","outputs":[{"internalType":"uint256","name":"amountToken","type":"uint256"},{"internalType":"uint256","name":"amountETH","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"internalType":"address","name":"token","type":"address"},{"internalType":"uint256","name":"liquidity","type":"uint256"},{"internalType":"uint256","name":"amountTokenMin","type":"uint256"},{"internalType":"uint256","name":"amountETHMin","type":"uint256"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"},{"internalType":"bool","name":"approveMax","type":"bool"},{"internalType":"uint8","name":"v","type":"uint8"},{"internalType":"bytes32","name":"r","type":"bytes32"},{"internalType":"bytes32","name":"s","type":"bytes32"}],"name":"removeLiquidityETHWithPermit","outputs":[{"internalType":"uint256","name":"amountToken","type":"uint256"},{"internalType":"uint256","name":"amountETH","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"internalType":"address","name":"token","type":"address"},{"internalType":"uint256","name":"liquidity","type":"uint256"},{"internalType":"uint256","name":"amountTokenMin","type":"uint256"},{"internalType":"uint256","name":"amountETHMin","type":"uint256"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"},{"internalType":"bool","name":"approveMax","type":"bool"},{"internalType":"uint8","name":"v","type":"uint8"},{"internalType":"bytes32","name":"r","type":"bytes32"},{"internalType":"bytes32","name":"s","type":"bytes32"}],"name":"removeLiquidityETHWithPermitSupportingFeeOnTransferTokens","outputs":[{"internalType":"uint256","name":"amountETH","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"internalType":"address","name":"tokenA","type":"address"},{"internalType":"address","name":"tokenB","type":"address"},{"internalType":"uint256","name":"liquidity","type":"uint256"},{"internalType":"uint256","name":"amountAMin","type":"uint256"},{"internalType":"uint256","name":"amountBMin","type":"uint256"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"},{"internalType":"bool","name":"approveMax","type":"bool"},{"internalType":"uint8","name":"v","type":"uint8"},{"internalType":"bytes32","name":"r","type":"bytes32"},{"internalType":"bytes32","name":"s","type":"bytes32"}],"name":"removeLiquidityWithPermit","outputs":[{"internalType":"uint256","name":"amountA","type":"uint256"},{"internalType":"uint256","name":"amountB","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"internalType":"uint256","name":"amountOut","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapETHForExactTokens","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"payable","type":"function"},
+    {"inputs":[{"internalType":"uint256","name":"amountOutMin","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapExactETHForTokens","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"payable","type":"function"},
+    {"inputs":[{"internalType":"uint256","name":"amountOutMin","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapExactETHForTokensSupportingFeeOnTransferTokens","outputs":[],"stateMutability":"payable","type":"function"},
+    {"inputs":[{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMin","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapExactTokensForETH","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMin","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapExactTokensForETHSupportingFeeOnTransferTokens","outputs":[],"stateMutability":"nonpayable","type":"function"},
     {"inputs":[{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMin","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapExactTokensForTokens","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"nonpayable","type":"function"},
-    {"inputs":[{"internalType":"uint256","name":"amountOut","type":"uint256"},{"internalType":"uint256","name":"amountInMax","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapTokensForExactTokens","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"nonpayable","type":"function"}
+    {"inputs":[{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMin","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapExactTokensForTokensSupportingFeeOnTransferTokens","outputs":[],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"internalType":"uint256","name":"amountOut","type":"uint256"},{"internalType":"uint256","name":"amountInMax","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapTokensForExactETH","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"nonpayable","type":"function"},
+    {"inputs":[{"internalType":"uint256","name":"amountOut","type":"uint256"},{"internalType":"uint256","name":"amountInMax","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapTokensForExactTokens","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"nonpayable","type":"function"},
+    {"stateMutability":"payable","type":"receive"}
 ]
-
-# Token addresses for Base network
-WETH_BASE = "0x4200000000000000000000000000000000000006"
-USDC_BASE = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
-weETH_BASE = "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A"
-
-# Extended token mapping for Base network
-TOKEN_ADDRESSES = {
-    'WETH': WETH_BASE,
-    'USDC': USDC_BASE,
-    'weETH': weETH_BASE,
-    'USDT': USDC_BASE,  # Use USDC as proxy for USDT
-    'cbBTC': WETH_BASE,  # Use WETH as proxy for cbBTC
-    'cbETH': WETH_BASE,  # Use WETH as proxy for cbETH
-    'wstETH': WETH_BASE,  # Use WETH as proxy for wstETH
-    'bsdETH': '0xCb327b99fF831bF8223cCEd12B1338FF3aA322Ff',  # Use WETH as proxy for bsdETH
-    'OETHb': WETH_BASE,   # Use WETH as proxy for OETHb
-    'AAVE': WETH_BASE,    # Use WETH as proxy for AAVE
-    'DEGEN': WETH_BASE,   # Use WETH as proxy for DEGEN
-    'BRETT': WETH_BASE,   # Use WETH as proxy for BRETT
-    'REI': WETH_BASE,     # Use WETH as proxy for REI
-    'FAI': WETH_BASE,     # Use WETH as proxy for FAI
-    'KTA': WETH_BASE,     # Use WETH as proxy for KTA
-    'MORPHO': WETH_BASE,  # Use WETH as proxy for MORPHO
-    'KEYCAT': WETH_BASE,  # Use WETH as proxy for KEYCAT
-    'SPEC': WETH_BASE,    # Use WETH as proxy for SPEC
-    'SPX': WETH_BASE,     # Use WETH as proxy for SPX
-    'PRIME': WETH_BASE,   # Use WETH as proxy for PRIME
-    'SKI': WETH_BASE,     # Use WETH as proxy for SKI
-    'MIGGLES': WETH_BASE, # Use WETH as proxy for MIGGLES
-    'uSOL': WETH_BASE,    # Use WETH as proxy for uSOL
-    'ETHFI': WETH_BASE,   # Use WETH as proxy for ETHFI
-    'AERO': WETH_BASE,    # Use WETH as proxy for AERO
-    'ZORA': USDC_BASE,    # Use USDC as proxy for ZORA
-    'SEAM': USDC_BASE,    # Use USDC as proxy for SEAM
-    'LUM': WETH_BASE,     # Use WETH as proxy for LUM
-    'CLANKER': WETH_BASE, # Use WETH as proxy for CLANKER
-    'VIRTUAL': WETH_BASE, # Use WETH as proxy for VIRTUAL
-    'uXRP': WETH_BASE,    # Use WETH as proxy for uXRP
-}
 
 # ERC20 Token ABI for approvals
 ERC20_ABI = [
@@ -167,7 +142,6 @@ class ArbitrageExecutor:
         
         # Initialize contracts
         self.uniswap_router = w3.eth.contract(address=UNISWAP_V3_ROUTER, abi=UNISWAP_V3_ROUTER_ABI)
-        self.sushi_router = w3.eth.contract(address=SUSHI_ROUTER, abi=SUSHI_ROUTER_ABI)
         self.aerodrome_router = w3.eth.contract(address=AERODROME_ROUTER, abi=AERODROME_ROUTER_ABI)
         
         # Initialize flash loan contracts
@@ -417,55 +391,6 @@ class ArbitrageExecutor:
             print(f"📊 Simulation: Would swap {amount_in} tokens on Uniswap")
             return True
     
-    def execute_sushiswap_swap(self, token_in, token_out, amount_in, amount_out_min, fee=None):
-        """Execute swap on SushiSwap"""
-        if not self.account:
-            raise ValueError("No account loaded")
-            
-        # Get current block timestamp
-        latest_block = self.w3.eth.get_block('latest')
-        deadline = latest_block.get('timestamp', 0) + 300  # 5 minutes
-        
-        # Build path
-        path = [Web3.to_checksum_address(token_in), Web3.to_checksum_address(token_out)]
-        
-        # Build transaction
-        swap_function = self.sushi_router.functions.swapExactTokensForTokens(
-            amount_in,
-            amount_out_min,
-            path,
-            self.account.address,
-            deadline
-        )
-        
-        nonce = self.w3.eth.get_transaction_count(self.account.address)
-        gas_price = self.w3.eth.gas_price
-        
-        tx = swap_function.build_transaction({
-            'from': self.account.address,
-            'gas': 300000,
-            'gasPrice': gas_price,
-            'nonce': nonce
-        })
-        
-        if not SIMULATION_MODE:
-            # Sign and send swap
-            signed_tx = self.account.sign_transaction(tx)
-            tx_hash = self.w3.eth.send_raw_transaction(signed_tx.rawTransaction)
-            print(f"✅ SushiSwap swap sent: {tx_hash.hex()}")
-            
-            # Wait for confirmation
-            receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
-            if receipt["status"] == 1:
-                print(f"✅ SushiSwap swap confirmed!")
-                return True
-            else:
-                print("❌ SushiSwap swap failed")
-                return False
-        else:
-            print(f"📊 Simulation: Would swap {amount_in} tokens on SushiSwap")
-            return True
-    
     def execute_flash_loan_arbitrage(self, opportunity):
         """Execute arbitrage using flash loans for capital efficiency"""
         if not self.account:
@@ -547,7 +472,7 @@ class ArbitrageExecutor:
             if not SIMULATION_MODE:
                 # Determine buyFee and sellFee (uint24)
                 if opportunity:
-                    print(f"[DEBUG] Opportunity fee tiers: uniswap_fee_tier={opportunity.get('uniswap_fee_tier')}, sushiswap_fee_tier={opportunity.get('sushiswap_fee_tier')}, aerodrome_fee_tier={opportunity.get('aerodrome_fee_tier')}")
+                    print(f"[DEBUG] Opportunity fee tiers: uniswap_fee_tier={opportunity.get('uniswap_fee_tier')}, aerodrome_fee_tier={opportunity.get('aerodrome_fee_tier')}")
                     print(f"[DEBUG] buy_dex={buy_dex}, sell_dex={sell_dex}")
                     if buy_dex == 'Uniswap':
                         buyFee = opportunity.get('uniswap_fee_tier')
@@ -556,9 +481,6 @@ class ArbitrageExecutor:
                             print(f"❌ No Uniswap fee tier for buy side of {opportunity['pair']}, skipping opportunity.")
                             return False
                         buyFee = int(buyFee)
-                    elif buy_dex == 'SushiSwap':
-                        buyFee = int(opportunity.get('sushiswap_fee_tier', 3000))
-                        print(f"[DEBUG] buyFee (SushiSwap) = {buyFee}")
                     elif buy_dex == 'Aerodrome':
                         buyFee = opportunity.get('aerodrome_fee_tier', 0)
                         print(f"[DEBUG] buyFee (Aerodrome) = {buyFee}")
@@ -573,9 +495,6 @@ class ArbitrageExecutor:
                             print(f"❌ No Uniswap fee tier for sell side of {opportunity['pair']}, skipping opportunity.")
                             return False
                         sellFee = int(sellFee)
-                    elif sell_dex == 'SushiSwap':
-                        sellFee = int(opportunity.get('sushiswap_fee_tier', 3000))
-                        print(f"[DEBUG] sellFee (SushiSwap) = {sellFee}")
                     elif sell_dex == 'Aerodrome':
                         sellFee = opportunity.get('aerodrome_fee_tier', 0)
                         print(f"[DEBUG] sellFee (Aerodrome) = {sellFee}")
@@ -728,10 +647,10 @@ class ArbitrageExecutor:
                         output_token_address, 
                         opportunity.get('uniswap_fee_tier', 3000)
                     )
-            elif opportunity['buy_dex'] == 'SushiSwap':
-                pair_address = opportunity.get('sushiswap_pair_address')
+            elif opportunity['buy_dex'] == 'Aerodrome':
+                pair_address = opportunity.get('aerodrome_pool_address')
                 if pair_address:
-                    live_buy_price = get_live_sushiswap_price(pair_address)
+                    live_buy_price = get_live_aerodrome_price(pair_address)
             if live_buy_price:
                 print(f"   Live {opportunity['buy_dex']} price: {live_buy_price:.6f}")
                 print(f"   Subgraph {opportunity['buy_dex']} price: {opportunity['buy_price']:.6f}")
@@ -789,9 +708,6 @@ class ArbitrageExecutor:
             if buy_dex == 'Uniswap':
                 if not self.approve_token(token0, UNISWAP_V3_ROUTER, amount):
                     return False
-            elif buy_dex == 'SushiSwap':
-                if not self.approve_token(token0, SUSHI_ROUTER, amount):
-                    return False
             elif buy_dex == 'Aerodrome':
                 # Add approval logic if needed for Aerodrome
                 pass
@@ -806,10 +722,6 @@ class ArbitrageExecutor:
                 if buy_dex == 'Uniswap':
                     fee = opportunity['uniswap_fee_tier'] if opportunity and 'uniswap_fee_tier' in opportunity else 3000
                     if not self.execute_uniswap_swap(token0, token1, amount, amount_out_min, fee):
-                        return False
-                elif buy_dex == 'SushiSwap':
-                    fee = opportunity['sushiswap_fee_tier'] if opportunity and 'sushiswap_fee_tier' in opportunity else None
-                    if not self.execute_sushiswap_swap(token0, token1, amount, amount_out_min, fee):
                         return False
                 elif buy_dex == 'Aerodrome':
                     fee = opportunity['aerodrome_fee_tier'] if opportunity and 'aerodrome_fee_tier' in opportunity else None
@@ -895,10 +807,6 @@ class ArbitrageExecutor:
                         return False
                     
                     if not self.execute_uniswap_swap(token1, token0, sell_amount, min_out, fee):
-                        return False
-                elif sell_dex == 'SushiSwap':
-                    fee = opportunity['sushiswap_fee_tier'] if opportunity and 'sushiswap_fee_tier' in opportunity else None
-                    if not self.execute_sushiswap_swap(token1, token0, amount, amount_out_min, fee):
                         return False
                 elif sell_dex == 'Aerodrome':
                     fee = opportunity['aerodrome_fee_tier'] if opportunity and 'aerodrome_fee_tier' in opportunity else None
@@ -1106,14 +1014,6 @@ class ArbitrageExecutor:
                 total_gas += gas
             except Exception as e:
                 gas_details['approve_buy'] = 0
-        elif buy_dex == 'SushiSwap':
-            approve_func = self.get_token_contract(token0).functions.approve(SUSHI_ROUTER, amount)
-            try:
-                gas = approve_func.estimate_gas({'from': str(account)})
-                gas_details['approve_buy'] = gas
-                total_gas += gas
-            except Exception as e:
-                gas_details['approve_buy'] = 0
         elif buy_dex == 'Aerodrome':
             approve_func = self.get_token_contract(token0).functions.approve(AERODROME_ROUTER, amount)
             try:
@@ -1141,17 +1041,6 @@ class ArbitrageExecutor:
                 total_gas += gas
             except Exception as e:
                 gas_details['buy_swap'] = 0
-        elif buy_dex == 'SushiSwap':
-            path = [Web3.to_checksum_address(token0), Web3.to_checksum_address(token1)]
-            latest_block = self.w3.eth.get_block('latest')
-            deadline = latest_block.get('timestamp', 0) + 300
-            swap_func = self.sushi_router.functions.swapExactTokensForTokens(amount, amount_out_min, path, account, deadline)
-            try:
-                gas = swap_func.estimate_gas({'from': str(account)})
-                gas_details['buy_swap'] = gas
-                total_gas += gas
-            except Exception as e:
-                gas_details['buy_swap'] = 0
         elif buy_dex == 'Aerodrome':
             route = [{
                 'from': Web3.to_checksum_address(token0),
@@ -1171,14 +1060,6 @@ class ArbitrageExecutor:
         # Approval for sell DEX
         if sell_dex == 'Uniswap':
             approve_func = self.get_token_contract(token1).functions.approve(UNISWAP_V3_ROUTER, amount)
-            try:
-                gas = approve_func.estimate_gas({'from': str(account)})
-                gas_details['approve_sell'] = gas
-                total_gas += gas
-            except Exception as e:
-                gas_details['approve_sell'] = 0
-        elif sell_dex == 'SushiSwap':
-            approve_func = self.get_token_contract(token1).functions.approve(SUSHI_ROUTER, amount)
             try:
                 gas = approve_func.estimate_gas({'from': str(account)})
                 gas_details['approve_sell'] = gas
@@ -1212,17 +1093,6 @@ class ArbitrageExecutor:
                 total_gas += gas
             except Exception as e:
                 gas_details['sell_swap'] = 0
-        elif sell_dex == 'SushiSwap':
-            path = [Web3.to_checksum_address(token1), Web3.to_checksum_address(token0)]
-            latest_block = self.w3.eth.get_block('latest')
-            deadline = latest_block.get('timestamp', 0) + 300
-            swap_func = self.sushi_router.functions.swapExactTokensForTokens(amount, 0, path, account, deadline)
-            try:
-                gas = swap_func.estimate_gas({'from': str(account)})
-                gas_details['sell_swap'] = gas
-                total_gas += gas
-            except Exception as e:
-                gas_details['sell_swap'] = 0
         elif sell_dex == 'Aerodrome':
             route = [{
                 'from': Web3.to_checksum_address(token1),
@@ -1245,43 +1115,57 @@ class ArbitrageExecutor:
         return gas_eth, gas_usd, gas_details
 
     def auto_convert_non_weth_to_weth(self, min_swap_usd=1.0):
-        """Auto-convert any non-WETH token balances (USDC, bsdETH, etc.) back to WETH if balance > min_swap_usd"""
+        """Auto-convert any non-WETH token balances (USDC, etc.) back to WETH if balance > min_swap_usd"""
         eth_price_usd = 2500
-        tokens_to_check = ['USDC', 'bsdETH']  # Add more as needed
-        for symbol in tokens_to_check:
-            token_address = TOKEN_ADDRESSES.get(symbol)
-            if not token_address or token_address == WETH_BASE:
+        print("\n[Auto-Convert] Wallet balances BEFORE conversion:")
+        self.print_balances()
+        # Loop over all tokens except WETH
+        for symbol, token_address in TOKEN_ADDRESSES.items():
+            if symbol == 'WETH' or not token_address:
                 continue
-            balance = self.check_token_balance(token_address)
-            if symbol == 'USDC':
-                decimals = 6
-                price_usd = 1
-            else:
-                decimals = 18
-                price_usd = eth_price_usd
-            balance_float = balance / (10 ** decimals)
-            balance_usd = balance_float * price_usd
-            print(f"[DEBUG] {symbol} balance before conversion: {balance_float:.8f} ({balance_usd:.2f} USD)")
-            if balance_usd >= min_swap_usd:
-                print(f"🔄 Auto-converting {balance_float:.6f} {symbol} (${balance_usd:.2f}) to WETH...")
-                approve_success = self.approve_token(token_address, self.uniswap_router.address, balance)
-                if not approve_success:
-                    print(f"❌ Approval failed for {symbol}, skipping conversion.")
-                    continue
-                tx_hash = self.execute_uniswap_swap(token_address, WETH_BASE, balance, 0, 3000)
-                if tx_hash:
-                    print(f"✅ Uniswap swap sent: {tx_hash}")
-                    # Wait for confirmation (optional: could add a wait here)
-                    # Check balance after swap
-                    new_balance = self.check_token_balance(token_address)
-                    new_balance_float = new_balance / (10 ** decimals)
-                    print(f"[DEBUG] {symbol} balance after conversion: {new_balance_float:.8f}")
-                    if new_balance < 1:  # Allow for dust
-                        print(f"✅ Auto-converted all {symbol} to WETH!")
-                    else:
-                        print(f"⚠️  {symbol} balance remains after swap: {new_balance_float:.8f}")
+            if token_address == WETH_BASE:
+                continue  # Don't try to convert WETH to itself
+            try:
+                balance = self.check_token_balance(token_address)
+                if symbol == 'USDC':
+                    decimals = 6
+                    price_usd = 1
                 else:
-                    print(f"❌ Swap failed for {symbol}")
+                    decimals = 18
+                    price_usd = eth_price_usd
+                balance_float = balance / (10 ** decimals)
+                balance_usd = balance_float * price_usd
+                print(f"[DEBUG] {symbol} balance before conversion: {balance_float:.8f} ({balance_usd:.2f} USD)")
+                if balance_usd >= min_swap_usd and balance > 0:
+                    print(f"🔄 Auto-converting {balance_float:.6f} {symbol} (${balance_usd:.2f}) to WETH...")
+                    approve_success = self.approve_token(token_address, self.uniswap_router.address, balance)
+                    if not approve_success:
+                        print(f"❌ Approval failed for {symbol}, skipping conversion.")
+                        continue
+                    # Try Uniswap first, fallback to Aerodrome if Uniswap fails
+                    tx_hash = self.execute_uniswap_swap(token_address, WETH_BASE, balance, 0, 3000)
+                    if not tx_hash:
+                        print(f"⚠️  Uniswap swap failed, trying Aerodrome...")
+                        approve_success = self.approve_token(token_address, self.aerodrome_router.address, balance)
+                        if not approve_success:
+                            print(f"❌ Approval failed for {symbol} on Aerodrome, skipping conversion.")
+                            continue
+                        tx_hash = self.execute_aerodrome_swap(token_address, WETH_BASE, balance, 0)
+                    if tx_hash:
+                        print(f"✅ Swap sent: {tx_hash}")
+                        new_balance = self.check_token_balance(token_address)
+                        new_balance_float = new_balance / (10 ** decimals)
+                        print(f"[DEBUG] {symbol} balance after conversion: {new_balance_float:.8f}")
+                        if new_balance < 1:
+                            print(f"✅ Auto-converted all {symbol} to WETH!")
+                        else:
+                            print(f"⚠️  {symbol} balance remains after swap: {new_balance_float:.8f}")
+                    else:
+                        print(f"❌ Swap failed for {symbol}")
+            except Exception as e:
+                print(f"❌ Error converting {symbol} to WETH: {e}")
+        print("\n[Auto-Convert] Wallet balances AFTER conversion:")
+        self.print_balances()
 
     def print_balances(self):
         """Print all token balances in the wallet for tracked tokens"""
@@ -1417,80 +1301,6 @@ async def get_uniswap_prices():
     except Exception as e:
         print(f"Error fetching Uniswap prices: {e}")
         return {}
-
-async def get_sushiswap_prices():
-    """Get all SushiSwap pool prices with enhanced monitoring"""
-    if not SUSHI_FACTORY_ADDRESS:
-        print("SUSHI_FACTORY_ADDRESS not configured")
-        return {}
-    
-    factory = w3.eth.contract(address=Web3.to_checksum_address(SUSHI_FACTORY_ADDRESS), abi=SUSHI_FACTORY_ABI)
-    prices = {}
-    
-    try:
-        total_pairs = factory.functions.allPairsLength().call()
-        print(f"Scanning {min(500, total_pairs)} SushiSwap pairs...")  # Increased limit
-        
-        for i in range(min(500, total_pairs)):
-            if i % 100 == 0:
-                print(f"Processing SushiSwap pair {i}/{min(500, total_pairs)}...")
-            
-            try:
-                pair_addr = factory.functions.allPairs(i).call()
-                pair = w3.eth.contract(address=pair_addr, abi=PAIR_ABI)
-                
-                reserves = pair.functions.getReserves().call()
-                token0 = pair.functions.token0().call()
-                token1 = pair.functions.token1().call()
-                
-                if reserves[0] > 0 and reserves[1] > 0:
-                    symbols = []
-                    decimals = []
-                    for token in [token0, token1]:
-                        try:
-                            erc20 = w3.eth.contract(address=token, abi=[
-                                {"constant":True,"inputs":[],"name":"symbol","outputs":[{"name":"","type":"string"}],"type":"function"},
-                                {"constant":True,"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"type":"function"}
-                            ])
-                            symbol = erc20.functions.symbol().call()
-                            decimal = erc20.functions.decimals().call()
-                            symbols.append(symbol)
-                            decimals.append(decimal)
-                        except Exception:
-                            symbols.append("?")
-                            decimals.append(18)
-                    
-                    reserve0_normalized = reserves[0] / (10 ** decimals[0])
-                    reserve1_normalized = reserves[1] / (10 ** decimals[1])
-                    
-                    price = reserve1_normalized / reserve0_normalized if reserve0_normalized > 0 else 0
-                    
-                    if price < 0.0001 and reserve1_normalized > 0:
-                        price = reserve0_normalized / reserve1_normalized
-                    
-                    pair_key = f"{symbols[0]}/{symbols[1]}"
-                    
-                    # More aggressive filtering - look for pairs with significant liquidity
-                    total_liquidity_usd = (reserve0_normalized + reserve1_normalized) * 2500  # Rough USD estimate
-                    
-                    if price > 0 and total_liquidity_usd > MIN_LIQUIDITY_USD:  # Only pairs with >$50k liquidity
-                        prices[pair_key] = {
-                            'price': price,
-                            'pair_address': pair_addr,
-                            'token0': token0,
-                            'token1': token1,
-                            'liquidity_usd': total_liquidity_usd,
-                            'fee_tier': None  # SushiSwap V2 does not have fee tiers, but keep for consistency
-                        }
-                        
-            except Exception as e:
-                continue
-                
-    except Exception as e:
-        print(f"SushiSwap factory not accessible: {e}")
-        return {}
-    
-    return prices
 
 async def get_aerodrome_prices():
     """Get all Aerodrome pool prices with enhanced monitoring"""
@@ -1636,10 +1446,10 @@ def get_live_uniswap_price(pool_address, token0_address, token1_address, fee_tie
         print(f"Error getting live Uniswap price for {pool_address}: {e}")
         return None
 
-def get_live_sushiswap_price(pair_address):
-    """Get live price from SushiSwap pair contract"""
+def get_live_aerodrome_price(pair_address):
+    """Get live price from Aerodrome pair contract"""
     try:
-        # SushiSwap Pair ABI (minimal for price checking)
+        # Aerodrome Pair ABI (minimal for price checking)
         pair_abi = [
             {"constant":True,"inputs":[],"name":"getReserves","outputs":[{"internalType":"uint112","name":"_reserve0","type":"uint112"},{"internalType":"uint112","name":"_reserve1","type":"uint112"},{"internalType":"uint32","name":"_blockTimestampLast","type":"uint32"}],"payable":False,"stateMutability":"view","type":"function"},
             {"constant":True,"inputs":[],"name":"token0","outputs":[{"internalType":"address","name":"","type":"address"}],"payable":False,"stateMutability":"view","type":"function"},
@@ -1665,7 +1475,7 @@ def get_live_sushiswap_price(pair_address):
         return price
         
     except Exception as e:
-        print(f"Error getting live SushiSwap price for {pair_address}: {e}")
+        print(f"Error getting live Aerodrome price for {pair_address}: {e}")
         return None
 
 def check_and_convert_eth_if_needed(executor, input_token_address, input_token_symbol, required_amount):
@@ -1703,119 +1513,77 @@ def check_and_convert_eth_if_needed(executor, input_token_address, input_token_s
         print(f"   ❌ Error checking/converting token: {e}")
         return False
 
-def find_arbitrage_opportunities(uniswap_prices, sushiswap_prices, aerodrome_prices):
+def find_arbitrage_opportunities(uniswap_prices, aerodrome_prices, executor=None):
     """Find arbitrage opportunities with enhanced analysis"""
     opportunities = []
     all_prices = {
         'Uniswap': uniswap_prices,
-        'SushiSwap': sushiswap_prices,
         'Aerodrome': aerodrome_prices
     }
-    print(f"Uniswap pairs: {list(uniswap_prices.keys())}")
-    print(f"SushiSwap pairs: {list(sushiswap_prices.keys())[:5]}...")
-    print(f"Aerodrome pairs: {list(aerodrome_prices.keys())[:5]}...")
     all_pairs = set()
     for dex_prices in all_prices.values():
         all_pairs.update(dex_prices.keys())
-    print(f"Total unique pairs found: {len(all_pairs)}")
-    # Allow any pair where WETH is one of the tokens
-    def is_weth_pair(pair):
-        return 'WETH' in pair.split('/')
-    # Check what tokens we have available
-    available_tokens = ['WETH', 'USDC']  # We know we have these
-    print(f"Available tokens for arbitrage: {available_tokens}")
     for pair in all_pairs:
-        if not is_weth_pair(pair):
-            print(f"Skipping {pair} - not a WETH pair")
+        prices = {dex: all_prices[dex][pair] for dex in all_prices if pair in all_prices[dex]}
+        if not isinstance(prices, dict) or len(prices) < 2:
+            print(f"[SKIP] {pair}: not enough DEXes ({list(prices.keys())})")
             continue
-        # Skip weETH/WETH for now due to token compatibility issues
-        if 'weETH' in pair:
-            continue
-        # Get actual token addresses from the subgraph data
-        token0_address = None
-        token1_address = None
-        if pair in uniswap_prices:
-            token0_address = uniswap_prices[pair]['token0']
-            token1_address = uniswap_prices[pair]['token1']
-        elif pair in aerodrome_prices:
-            token0_address = aerodrome_prices[pair]['token0']
-            token1_address = aerodrome_prices[pair]['token1']
-        elif pair in sushiswap_prices:
-            token0_address = sushiswap_prices[pair]['token0']
-            token1_address = sushiswap_prices[pair]['token1']
-        if not token0_address or not token1_address or token0_address == token1_address:
-            print(f"Skipping {pair} - invalid token addresses")
-            continue
-        pair_tokens = pair.split('/')
-        token0_symbol, token1_symbol = pair_tokens[0], pair_tokens[1]
-        input_token_symbol = None
-        if token0_symbol in available_tokens:
-            input_token_symbol = token0_symbol
-        elif token1_symbol in available_tokens:
-            input_token_symbol = token1_symbol
-        if not input_token_symbol:
-            print(f"Skipping {pair} - no available input token")
-            continue
-        # --- Normalize price direction ---
         pair_prices = {}
         for dex_name, dex_prices in all_prices.items():
             if pair in dex_prices:
                 price = dex_prices[pair]['price']
                 pair_prices[dex_name] = price
-        fee_tier = 100 if 'WETH' in pair else uniswap_prices[pair]['fee_tier'] if pair in uniswap_prices else None
-        print(f"[DEBUG] Forcing Uniswap fee tier for {pair}: {fee_tier}")
-        print(f"\n🔍 DEBUG: Analyzing {pair}:")
-        print(f"   Prices: {pair_prices}")
         if len(pair_prices) >= 2:
-            prices = list(pair_prices.values())
-            min_price = min(prices)
-            max_price = max(prices)
-            print(f"   Min price: {min_price}")
-            print(f"   Max price: {max_price}")
-            if max_price > min_price and min_price > 0:
-                buy_dex = [k for k, v in pair_prices.items() if v == min_price][0]
-                sell_dex = [k for k, v in pair_prices.items() if v == max_price][0]
-                profit_pct = ((max_price - min_price) / min_price) * 100
-                print(f"   Profit: {profit_pct:.2f}%")
-                print(f"   Buy on: {buy_dex}")
-                print(f"   Sell on: {sell_dex}")
-                if MIN_PROFIT_PCT <= profit_pct <= MAX_PROFIT_PCT:
-                    print(f"   ✅ Profit within range ({MIN_PROFIT_PCT}%-{MAX_PROFIT_PCT}%)")
-                    profit_analysis = estimate_flash_loan_profit(min_price, max_price, pair)
-                    if profit_analysis['is_profitable']:
-                        print(f"   ✅ Profitable after costs")
-                        uniswap_pool_address = uniswap_prices[pair]['pool_id'] if pair in uniswap_prices else None
-                        sushiswap_pair_address = sushiswap_prices[pair]['pair_address'] if pair in sushiswap_prices else None
-                        aerodrome_pool_address = aerodrome_prices[pair]['pool_id'] if pair in aerodrome_prices else None
-                        opportunities.append({
-                            'pair': pair,
-                            'buy_dex': buy_dex,
-                            'sell_dex': sell_dex,
-                            'buy_price': min_price,
-                            'sell_price': max_price,
-                            'profit_pct': profit_pct,
-                            'profit_analysis': profit_analysis,
-                            'strategy': 'flash_loan' if profit_analysis['flash_loan_profit'] > profit_analysis['regular_profit'] else 'regular',
-                            'uniswap_fee_tier': fee_tier,
-                            'sushiswap_fee_tier': sushiswap_prices[pair]['fee_tier'] if pair in sushiswap_prices else None,
-                            'aerodrome_fee_tier': 0 if pair in aerodrome_prices else None,
-                            'uniswap_pool_address': uniswap_pool_address,
-                            'sushiswap_pair_address': sushiswap_pair_address,
-                            'aerodrome_pool_address': aerodrome_pool_address,
-                            'priority': 'WETH' in pair,
-                            'token0_address': token0_address,
-                            'token1_address': token1_address,
-                            'input_token_symbol': input_token_symbol
-                        })
+            prices_list = list(pair_prices.values())
+            min_price = min(prices_list)
+            max_price = max(prices_list)
+            profit_pct = ((max_price - min_price) / min_price) * 100 if min_price > 0 else 0
+            print(f"[PAIR] {pair}: min={min_price}, max={max_price}, profit={profit_pct:.2f}%")
+            # For each buy/sell DEX combination
+            for buy_dex in pair_prices:
+                for sell_dex in pair_prices:
+                    if buy_dex == sell_dex:
+                        continue
+                    buy_price = pair_prices[buy_dex]
+                    sell_price = pair_prices[sell_dex]
+                    if sell_price <= buy_price:
+                        continue
+                    # Build opportunity dict
+                    # Get token addresses and fee tiers if available
+                    buy_info = all_prices[buy_dex][pair]
+                    sell_info = all_prices[sell_dex][pair]
+                    token0 = buy_info.get('token0')
+                    token1 = buy_info.get('token1')
+                    fee_tier_buy = buy_info.get('fee_tier')
+                    fee_tier_sell = sell_info.get('fee_tier')
+                    tvl = min(buy_info.get('tvl', 0), sell_info.get('tvl', 0))
+                    # Estimate profit
+                    profit_analysis = estimate_profit(buy_price, sell_price)
+                    opportunity = {
+                        'pair': pair,
+                        'buy_dex': buy_dex,
+                        'sell_dex': sell_dex,
+                        'buy_price': buy_price,
+                        'sell_price': sell_price,
+                        'profit_pct': profit_pct,
+                        'profit_analysis': profit_analysis,
+                        'token0_address': token0,
+                        'token1_address': token1,
+                        'uniswap_fee_tier': fee_tier_buy if buy_dex == 'Uniswap' else fee_tier_sell if sell_dex == 'Uniswap' else None,
+                        'aerodrome_fee_tier': fee_tier_buy if buy_dex == 'Aerodrome' else fee_tier_sell if sell_dex == 'Aerodrome' else None,
+                        'uniswap_pool_address': buy_info.get('pool_id') if buy_dex == 'Uniswap' else sell_info.get('pool_id') if sell_dex == 'Uniswap' else None,
+                        'aerodrome_pool_address': buy_info.get('pool_id') if buy_dex == 'Aerodrome' else sell_info.get('pool_id') if sell_dex == 'Aerodrome' else None,
+                    }
+                    # Use executor.validate_opportunity for filtering if provided
+                    if executor is not None:
+                        is_valid, reason = executor.validate_opportunity(opportunity)
+                        if is_valid:
+                            opportunities.append(opportunity)
+                        else:
+                            print(f"[FILTERED] {pair} ({buy_dex}->{sell_dex}): {reason}")
                     else:
-                        print(f"   ❌ Not profitable after costs")
-                else:
-                    print(f"   ❌ Profit outside range ({MIN_PROFIT_PCT}%-{MAX_PROFIT_PCT}%)")
-            else:
-                print(f"   ❌ No price difference or invalid prices")
-        else:
-            print(f"   ❌ Not enough DEXes have this pair")
-    opportunities.sort(key=lambda x: (not x.get('priority', False), x['profit_analysis']['net_profit_usd']), reverse=True)
+                        if profit_analysis['net_profit_usd'] > 0 and tvl > MIN_LIQUIDITY_USD:
+                            opportunities.append(opportunity)
     return opportunities
 
 def estimate_flash_loan_profit(buy_price, sell_price, pair_info, eth_amount=10.0, eth_price_usd=2500):
@@ -1851,23 +1619,35 @@ def estimate_flash_loan_profit(buy_price, sell_price, pair_info, eth_amount=10.0
         'is_profitable': max(regular_profit['net_profit_usd'], flash_loan_profit) > MIN_PROFIT_THRESHOLD_USD
     }
 
-def estimate_profit(buy_price, sell_price, eth_amount=DEFAULT_ETH_AMOUNT, eth_price_usd=2500):
+def estimate_profit(buy_price, sell_price, eth_amount=None, eth_price_usd=2500, gas_cost_usd=None):
     """
-    Estimate realistic arbitrage profit accounting for all costs
+    Estimate realistic arbitrage profit accounting for all costs, with correct unit conversions.
+    buy_price and sell_price are in terms of output_token per input_token (e.g., WETH per bsdETH).
+    All profit/costs are in USD.
     """
-    gross_profit_usd = (sell_price - buy_price) * eth_amount * eth_price_usd
-    
-    gas_price_eth = BASE_GAS_PRICE_GWEI / 1e9
-    total_gas_eth = (GAS_LIMIT_SWAP * 2 + GAS_LIMIT_APPROVE * 2) * gas_price_eth
-    gas_cost_usd = total_gas_eth * eth_price_usd
-    
-    transaction_fees_usd = (buy_price + sell_price) * eth_amount * eth_price_usd * TRANSACTION_FEE_PCT * 2
-    slippage_cost_usd = (buy_price + sell_price) * eth_amount * eth_price_usd * SLIPPAGE_PCT * 2
+    if eth_amount is None:
+        eth_amount = POSITION_SIZE_USD
+    if buy_price < 10:
+        amount_in = POSITION_SIZE_USD / eth_price_usd
+        amount_in_usd = amount_in * eth_price_usd
+        print(f"[DEBUG] estimate_profit: buy_price={buy_price}, sell_price={sell_price}, amount_in={amount_in} WETH, amount_in_usd={amount_in_usd}")
+    else:
+        amount_in = POSITION_SIZE_USD / 1
+        amount_in_usd = amount_in
+        print(f"[DEBUG] estimate_profit: buy_price={buy_price}, sell_price={sell_price}, amount_in={amount_in} USDC, amount_in_usd={amount_in_usd}")
+    gross_profit_usd = (sell_price - buy_price) * amount_in
+    print(f"[DEBUG] gross_profit_usd: {gross_profit_usd}")
+    if gas_cost_usd is None:
+        gas_price_eth = BASE_GAS_PRICE_GWEI / 1e9
+        total_gas_eth = (GAS_LIMIT_SWAP * 2 + GAS_LIMIT_APPROVE * 2) * gas_price_eth
+        gas_cost_usd = total_gas_eth * eth_price_usd
+    transaction_fees_usd = POSITION_SIZE_USD * TRANSACTION_FEE_PCT * 2
+    slippage_cost_usd = POSITION_SIZE_USD * SLIPPAGE_PCT * 2
     mev_protection_cost_usd = MEV_PROTECTION_COST_USD
-    
     total_costs_usd = gas_cost_usd + transaction_fees_usd + slippage_cost_usd + mev_protection_cost_usd
     net_profit_usd = gross_profit_usd - total_costs_usd
-    
+    net_profit_pct = (net_profit_usd / POSITION_SIZE_USD) * 100 if POSITION_SIZE_USD else 0
+    print(f"[DEBUG] net_profit_usd: {net_profit_usd}, total_costs_usd: {total_costs_usd}, net_profit_pct: {net_profit_pct:.2f}%")
     return {
         'gross_profit_usd': gross_profit_usd,
         'gas_cost_usd': gas_cost_usd,
@@ -1876,22 +1656,25 @@ def estimate_profit(buy_price, sell_price, eth_amount=DEFAULT_ETH_AMOUNT, eth_pr
         'mev_protection_cost_usd': mev_protection_cost_usd,
         'total_costs_usd': total_costs_usd,
         'net_profit_usd': net_profit_usd,
+        'net_profit_pct': net_profit_pct,
         'is_profitable': net_profit_usd > MIN_PROFIT_THRESHOLD_USD
     }
 
 async def monitor_once(executor):
     print("\n📊 Fetching prices from DEXes...")
     uniswap_prices = await get_uniswap_prices()
-    sushiswap_prices = await get_sushiswap_prices()
     aerodrome_prices = await get_aerodrome_prices()
     print(f"📊 Found {len(uniswap_prices)} Uniswap pools")
-    print(f"📊 Found {len(sushiswap_prices)} SushiSwap pools")
     print(f"📊 Found {len(aerodrome_prices)} Aerodrome pools")
     print("🔍 Analyzing arbitrage opportunities...")
-    opportunities = find_arbitrage_opportunities(uniswap_prices, sushiswap_prices, aerodrome_prices)
+    opportunities = find_arbitrage_opportunities(uniswap_prices, aerodrome_prices, executor=executor)
+    if not opportunities:
+        print("❌ No executable arbitrage opportunities found")
+        opportunities = []
     if opportunities:
         print(f"\n🔥 Found {len(opportunities)} executable arbitrage opportunities:")
         print("-" * 80)
+        executed = False
         for i, opp in enumerate(opportunities[:5]):  # Show top 5
             analysis = opp['profit_analysis']
             strategy = opp.get('strategy', 'regular')
@@ -1900,29 +1683,32 @@ async def monitor_once(executor):
             print(f"   Sell on {opp['sell_dex']} @ {opp['sell_price']:.6f}")
             print(f"   Profit: {opp['profit_pct']:.2f}%")
             if strategy == 'flash_loan':
-                print(f"   Flash Loan Profit: ${analysis['flash_loan_profit']:.2f}")
-                print(f"   Flash Loan Amount: ${analysis['flash_loan_amount_usd']:,.0f}")
-                print(f"   Flash Loan Fee: ${analysis['flash_loan_fee']:.2f}")
-            else:
+                if 'flash_loan_profit' in analysis:
+                    print(f"   Flash Loan Profit: ${analysis['flash_loan_profit']:.2f}")
+                if 'flash_loan_amount_usd' in analysis:
+                    print(f"   Flash Loan Amount: ${analysis['flash_loan_amount_usd']:,.0f}")
+                if 'flash_loan_fee' in analysis:
+                    print(f"   Flash Loan Fee: ${analysis['flash_loan_fee']:.2f}")
+            if 'regular_profit' in analysis:
                 print(f"   Regular Profit: ${analysis['regular_profit']:.2f}")
-            print(f"   Net Profit: ${analysis['net_profit_usd']:.2f}")
-            if EXECUTION_MODE and i == 0:
+            print(f"   Net Profit: ${analysis.get('net_profit_usd', 0):.2f}")
+            print(f"   Net Profit %: {analysis.get('net_profit_pct', 0):.2f}%")
+            if EXECUTION_MODE and not executed:
                 print(f"\n🎯 Executing opportunity: {opp['pair']}")
                 print(f"   Strategy: {strategy.upper()}")
-                print(f"💰 Using REGULAR arbitrage for {opp['pair']}")
-                success = executor.execute_arbitrage(opp)
+                if FLASH_LOAN_ENABLED:
+                    print(f"💰 Using FLASH LOAN arbitrage for {opp['pair']}")
+                    success = executor.execute_flash_loan_arbitrage(opp)
+                else:
+                    print(f"💰 Using REGULAR arbitrage for {opp['pair']}")
+                    success = executor.execute_arbitrage(opp)
                 if success:
                     print("✅ Arbitrage executed successfully!")
+                    executed = True
+                    break
                 else:
                     print("❌ Arbitrage execution failed")
-                break  # Only execute one per cycle
-    else:
-        print("❌ No executable arbitrage opportunities found")
-    print("\n🏁 Run completed! Printing summary...")
-    print(f"   - Opportunities found: {len(opportunities)}")
-    print(f"   - Flash loan enabled: {FLASH_LOAN_ENABLED}")
-    print(f"   - Execution mode: {'LIVE' if EXECUTION_MODE else 'SIMULATION'}")
-    print(f"   - Safe mode: {SAFE_MODE}")
+        # No break if not executed, so it tries the next opportunity
 
 async def monitor():
     """Single-run monitoring for arbitrage opportunities"""

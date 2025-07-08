@@ -124,18 +124,18 @@ contract FlashLoanReceiver is IFlashLoanReceiver {
             emit ArbitrageExecuted(tokenIn, tokenOut, buyAmount, buyAmount, buyDex);
             emit ArbitrageExecuted(tokenOut, tokenIn, sellAmount, sellAmount, sellDex);
         } else {
-            // Step 1: Buy on first DEX
-            if (keccak256(abi.encodePacked(buyDex)) == keccak256(abi.encodePacked("Uniswap"))) {
+        // Step 1: Buy on first DEX
+        if (keccak256(abi.encodePacked(buyDex)) == keccak256(abi.encodePacked("Uniswap"))) {
                 _executeUniswapSwap(tokenIn, tokenOut, buyAmount, buyFee);
-            } else if (keccak256(abi.encodePacked(buyDex)) == keccak256(abi.encodePacked("SushiSwap"))) {
-                _executeSushiSwap(tokenIn, tokenOut, buyAmount);
-            }
-            
-            // Step 2: Sell on second DEX
-            if (keccak256(abi.encodePacked(sellDex)) == keccak256(abi.encodePacked("Uniswap"))) {
+        } else if (keccak256(abi.encodePacked(buyDex)) == keccak256(abi.encodePacked("SushiSwap"))) {
+            _executeSushiSwap(tokenIn, tokenOut, buyAmount);
+        }
+        
+        // Step 2: Sell on second DEX
+        if (keccak256(abi.encodePacked(sellDex)) == keccak256(abi.encodePacked("Uniswap"))) {
                 _executeUniswapSwap(tokenOut, tokenIn, sellAmount, sellFee);
-            } else if (keccak256(abi.encodePacked(sellDex)) == keccak256(abi.encodePacked("SushiSwap"))) {
-                _executeSushiSwap(tokenOut, tokenIn, sellAmount);
+        } else if (keccak256(abi.encodePacked(sellDex)) == keccak256(abi.encodePacked("SushiSwap"))) {
+            _executeSushiSwap(tokenOut, tokenIn, sellAmount);
             }
         }
         
