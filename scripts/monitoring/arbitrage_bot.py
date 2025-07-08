@@ -22,7 +22,7 @@ EXECUTION_MODE = True  # DISABLED - Set to False for safety
 SIMULATION_MODE = False   # ENABLED - Set to True for simulation only
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")  # Your wallet private key
 MIN_LIQUIDITY_USD = 100000  # Increased to $100k liquidity for safety
-MAX_PROFIT_PCT = 20.0  # Reduced to 20% max profit for realistic opportunities
+MAX_PROFIT_PCT = 75.0  # Reduced to 20% max profit for realistic opportunities
 MIN_PROFIT_PCT = 0.1  # Lowered to 0.1% minimum for better opportunities
 MAX_SLIPPAGE = 0.02  # Increased to 2% slippage for testing
 # Update position size for testing
@@ -108,7 +108,7 @@ TOKEN_ADDRESSES = {
     'cbBTC': WETH_BASE,  # Use WETH as proxy for cbBTC
     'cbETH': WETH_BASE,  # Use WETH as proxy for cbETH
     'wstETH': WETH_BASE,  # Use WETH as proxy for wstETH
-    'bsdETH': WETH_BASE,  # Use WETH as proxy for bsdETH
+    'bsdETH': '0xCb327b99fF831bF8223cCEd12B1338FF3aA322Ff',  # Use WETH as proxy for bsdETH
     'OETHb': WETH_BASE,   # Use WETH as proxy for OETHb
     'AAVE': WETH_BASE,    # Use WETH as proxy for AAVE
     'DEGEN': WETH_BASE,   # Use WETH as proxy for DEGEN
@@ -195,9 +195,9 @@ class ArbitrageExecutor:
             if POSITION_SIZE_USD > 10:
                 return False, f"Position size ${POSITION_SIZE_USD} too large for testing mode"
             
-            # Only allow very conservative profit ranges
-            if profit_pct > 20.0:
-                return False, f"Profit {profit_pct:.2f}% too high for safe testing (max 20%)"
+            # Only allow profit up to MAX_PROFIT_PCT for safety
+            if profit_pct > MAX_PROFIT_PCT:
+                return False, f"Profit {profit_pct:.2f}% too high for safe testing (max {MAX_PROFIT_PCT}%)"
             
             # Only allow major tokens for safety
             safe_tokens = ['WETH', 'USDC', 'USDT', 'cbBTC', 'cbETH', 'wstETH']
@@ -665,76 +665,61 @@ class ArbitrageExecutor:
             return False
     
     def execute_arbitrage(self, opportunity):
-        """Execute the arbitrage trade with live price checking"""
+        """Execute the arbitrage trade with live price checking and gas estimation"""
         if not self.account:
             print("❌ Cannot execute - no wallet loaded")
             return False
-        
         try:
             # Validate opportunity
             is_valid, message = self.validate_opportunity(opportunity)
             if not is_valid:
                 print(f"❌ {message}")
                 return False
-            
             print(f"🚀 Executing arbitrage: {opportunity['pair']}")
             print(f"   Buy on {opportunity['buy_dex']} @ {opportunity['buy_price']:.6f}")
             print(f"   Sell on {opportunity['sell_dex']} @ {opportunity['sell_price']:.6f}")
             print(f"   Expected profit: {opportunity['profit_pct']:.2f}%")
             print(f"   Position size: ${POSITION_SIZE_USD}")
             print(f"   Mode: {'SIMULATION' if SIMULATION_MODE else 'LIVE'}")
-            
             # SAFETY CHECK: Confirm execution
             if SAFE_MODE:
                 print(f"⚠️  SAFE MODE: This is a test trade with ${POSITION_SIZE_USD}")
                 print(f"   Max potential loss: ${POSITION_SIZE_USD * 0.05:.2f} (5% slippage)")
-            
             # Parse token addresses from opportunity
             pair_tokens = opportunity['pair'].split('/')
             token0_symbol, token1_symbol = pair_tokens[0], pair_tokens[1]
-            
             # Calculate amounts first
             eth_amount = POSITION_SIZE_USD / 2500  # Convert USD to ETH
             token_amount = int(eth_amount * 1e18)  # Convert to wei
-            
             # Use actual token addresses from the opportunity
             token0_address = opportunity.get('token0_address', WETH_BASE)
             token1_address = opportunity.get('token1_address', WETH_BASE)
-            
             print(f"   Token0: {token0_symbol} ({token0_address})")
             print(f"   Token1: {token1_symbol} ({token1_address})")
             print(f"   Required amount: {token_amount} wei (${POSITION_SIZE_USD})")
-            
             # Determine input and output tokens based on arbitrage direction
             if opportunity['buy_dex'] == 'Uniswap' and opportunity['sell_dex'] == 'Aerodrome':
-                # Buy on Uniswap, sell on Aerodrome
                 input_token_symbol = token0_symbol
                 input_token_address = token0_address
                 output_token_symbol = token1_symbol
                 output_token_address = token1_address
             else:
-                # Default to token0 as input
                 input_token_symbol = token0_symbol
                 input_token_address = token0_address
                 output_token_symbol = token1_symbol
                 output_token_address = token1_address
-            
             print(f"   Input token: {input_token_symbol} ({input_token_address})")
             print(f"   Output token: {output_token_symbol} ({output_token_address})")
-            
             # Validate that we're not trying to swap the same token
             if input_token_address == output_token_address:
                 print(f"❌ Invalid swap: Cannot swap {input_token_symbol} for {output_token_symbol}")
                 print(f"   Both tokens have the same address: {input_token_address}")
                 return False
-            
             # Check live prices before executing
             print(f"🔍 Checking live prices before execution...")
-            
             # Get live price for buy DEX
             live_buy_price = None
             if opportunity['buy_dex'] == 'Uniswap':
-                # Get pool address from opportunity
                 pool_address = opportunity.get('uniswap_pool_address')
                 if pool_address:
                     live_buy_price = get_live_uniswap_price(
@@ -747,28 +732,32 @@ class ArbitrageExecutor:
                 pair_address = opportunity.get('sushiswap_pair_address')
                 if pair_address:
                     live_buy_price = get_live_sushiswap_price(pair_address)
-            
             if live_buy_price:
                 print(f"   Live {opportunity['buy_dex']} price: {live_buy_price:.6f}")
                 print(f"   Subgraph {opportunity['buy_dex']} price: {opportunity['buy_price']:.6f}")
                 price_diff = abs(live_buy_price - opportunity['buy_price']) / opportunity['buy_price'] * 100
                 print(f"   Price difference: {price_diff:.2f}%")
-                
                 if price_diff > 5:  # If price differs by more than 5%, skip
                     print(f"   ⚠️  Price difference too large, skipping opportunity")
                     return False
-            
             # Check if we have the input tokens, convert ETH if needed
             if not check_and_convert_eth_if_needed(self, input_token_address, input_token_symbol, token_amount):
                 print(f"❌ Cannot proceed without sufficient {input_token_symbol}")
                 return False
-            
             # Calculate amounts with slippage
             amount_out_min = int(token_amount * (1 - MAX_SLIPPAGE))
-            
             print(f"   Amount: {token_amount} wei")
             print(f"   Min out: {amount_out_min} wei")
-            
+            # --- GAS ESTIMATION AND PROFIT CHECK ---
+            expected_profit_usd = opportunity['profit_analysis']['net_profit_usd']
+            gas_eth, gas_usd, gas_details = self.estimate_gas_for_arbitrage(opportunity, token_amount, amount_out_min)
+            print(f"   Estimated total gas: {gas_eth:.6f} ETH (${gas_usd:.2f})")
+            print(f"   Gas breakdown: {gas_details}")
+            print(f"   Expected net profit (before gas): ${expected_profit_usd:.4f}")
+            print(f"   Expected net profit (after gas): ${expected_profit_usd - gas_usd:.4f}")
+            if expected_profit_usd - gas_usd <= 0:
+                print(f"❌ Skipping trade: expected profit does not cover gas cost.")
+                return False
             # Execute arbitrage
             success = self.execute_arbitrage_swaps(
                 opportunity['buy_dex'], 
@@ -779,14 +768,16 @@ class ArbitrageExecutor:
                 amount_out_min,
                 opportunity=opportunity
             )
-            
             if success:
                 print("✅ Arbitrage executed successfully!")
+                # Auto-convert any non-WETH tokens back to WETH if detected
+                self.auto_convert_non_weth_to_weth(min_swap_usd=5.0)
+                # Print all token balances after conversion
+                self.print_balances()
                 return True
             else:
                 print("❌ Arbitrage execution failed")
                 return False
-                
         except Exception as e:
             print(f"❌ Execution failed: {e}")
             return False
@@ -1093,6 +1084,219 @@ class ArbitrageExecutor:
         except Exception as e:
             print(f"❌ Error ensuring sufficient WETH: {e}")
             return False
+
+    def estimate_gas_for_arbitrage(self, opportunity, amount, amount_out_min):
+        """Estimate total gas cost (in ETH and USD) for the arbitrage (approvals + swaps)"""
+        gas_price = self.w3.eth.gas_price
+        total_gas = 0
+        gas_details = {}
+        buy_dex = opportunity['buy_dex']
+        sell_dex = opportunity['sell_dex']
+        token0 = opportunity['token0_address']
+        token1 = opportunity['token1_address']
+        if not self.account:
+            return 0, 0, {}
+        account = self.account.address
+        # Approval for buy DEX
+        if buy_dex == 'Uniswap':
+            approve_func = self.get_token_contract(token0).functions.approve(UNISWAP_V3_ROUTER, amount)
+            try:
+                gas = approve_func.estimate_gas({'from': str(account)})
+                gas_details['approve_buy'] = gas
+                total_gas += gas
+            except Exception as e:
+                gas_details['approve_buy'] = 0
+        elif buy_dex == 'SushiSwap':
+            approve_func = self.get_token_contract(token0).functions.approve(SUSHI_ROUTER, amount)
+            try:
+                gas = approve_func.estimate_gas({'from': str(account)})
+                gas_details['approve_buy'] = gas
+                total_gas += gas
+            except Exception as e:
+                gas_details['approve_buy'] = 0
+        elif buy_dex == 'Aerodrome':
+            approve_func = self.get_token_contract(token0).functions.approve(AERODROME_ROUTER, amount)
+            try:
+                gas = approve_func.estimate_gas({'from': str(account)})
+                gas_details['approve_buy'] = gas
+                total_gas += gas
+            except Exception as e:
+                gas_details['approve_buy'] = 0
+        # Buy swap
+        if buy_dex == 'Uniswap':
+            fee = opportunity['uniswap_fee_tier'] if 'uniswap_fee_tier' in opportunity else 3000
+            params = {
+                'tokenIn': Web3.to_checksum_address(token0),
+                'tokenOut': Web3.to_checksum_address(token1),
+                'fee': int(fee) & 0xFFFFFF,
+                'recipient': account,
+                'amountIn': amount,
+                'amountOutMinimum': amount_out_min,
+                'sqrtPriceLimitX96': 0
+            }
+            swap_func = self.uniswap_router.functions.exactInputSingle(params)
+            try:
+                gas = swap_func.estimate_gas({'from': str(account)})
+                gas_details['buy_swap'] = gas
+                total_gas += gas
+            except Exception as e:
+                gas_details['buy_swap'] = 0
+        elif buy_dex == 'SushiSwap':
+            path = [Web3.to_checksum_address(token0), Web3.to_checksum_address(token1)]
+            latest_block = self.w3.eth.get_block('latest')
+            deadline = latest_block.get('timestamp', 0) + 300
+            swap_func = self.sushi_router.functions.swapExactTokensForTokens(amount, amount_out_min, path, account, deadline)
+            try:
+                gas = swap_func.estimate_gas({'from': str(account)})
+                gas_details['buy_swap'] = gas
+                total_gas += gas
+            except Exception as e:
+                gas_details['buy_swap'] = 0
+        elif buy_dex == 'Aerodrome':
+            route = [{
+                'from': Web3.to_checksum_address(token0),
+                'to': Web3.to_checksum_address(token1),
+                'stable': False,
+                'factory': Web3.to_checksum_address('0x420DD381b31aEf6683db6B902084cB0FFECe40Da')
+            }]
+            latest_block = self.w3.eth.get_block('latest')
+            deadline = latest_block.get('timestamp', 0) + 300
+            swap_func = self.aerodrome_router.functions.swapExactTokensForTokens(amount, amount_out_min, route, account, deadline)
+            try:
+                gas = swap_func.estimate_gas({'from': str(account)})
+                gas_details['buy_swap'] = gas
+                total_gas += gas
+            except Exception as e:
+                gas_details['buy_swap'] = 0
+        # Approval for sell DEX
+        if sell_dex == 'Uniswap':
+            approve_func = self.get_token_contract(token1).functions.approve(UNISWAP_V3_ROUTER, amount)
+            try:
+                gas = approve_func.estimate_gas({'from': str(account)})
+                gas_details['approve_sell'] = gas
+                total_gas += gas
+            except Exception as e:
+                gas_details['approve_sell'] = 0
+        elif sell_dex == 'SushiSwap':
+            approve_func = self.get_token_contract(token1).functions.approve(SUSHI_ROUTER, amount)
+            try:
+                gas = approve_func.estimate_gas({'from': str(account)})
+                gas_details['approve_sell'] = gas
+                total_gas += gas
+            except Exception as e:
+                gas_details['approve_sell'] = 0
+        elif sell_dex == 'Aerodrome':
+            approve_func = self.get_token_contract(token1).functions.approve(AERODROME_ROUTER, amount)
+            try:
+                gas = approve_func.estimate_gas({'from': str(account)})
+                gas_details['approve_sell'] = gas
+                total_gas += gas
+            except Exception as e:
+                gas_details['approve_sell'] = 0
+        # Sell swap
+        if sell_dex == 'Uniswap':
+            fee = opportunity['uniswap_fee_tier'] if 'uniswap_fee_tier' in opportunity else 3000
+            params = {
+                'tokenIn': Web3.to_checksum_address(token1),
+                'tokenOut': Web3.to_checksum_address(token0),
+                'fee': int(fee) & 0xFFFFFF,
+                'recipient': account,
+                'amountIn': amount,
+                'amountOutMinimum': 0,
+                'sqrtPriceLimitX96': 0
+            }
+            swap_func = self.uniswap_router.functions.exactInputSingle(params)
+            try:
+                gas = swap_func.estimate_gas({'from': str(account)})
+                gas_details['sell_swap'] = gas
+                total_gas += gas
+            except Exception as e:
+                gas_details['sell_swap'] = 0
+        elif sell_dex == 'SushiSwap':
+            path = [Web3.to_checksum_address(token1), Web3.to_checksum_address(token0)]
+            latest_block = self.w3.eth.get_block('latest')
+            deadline = latest_block.get('timestamp', 0) + 300
+            swap_func = self.sushi_router.functions.swapExactTokensForTokens(amount, 0, path, account, deadline)
+            try:
+                gas = swap_func.estimate_gas({'from': str(account)})
+                gas_details['sell_swap'] = gas
+                total_gas += gas
+            except Exception as e:
+                gas_details['sell_swap'] = 0
+        elif sell_dex == 'Aerodrome':
+            route = [{
+                'from': Web3.to_checksum_address(token1),
+                'to': Web3.to_checksum_address(token0),
+                'stable': False,
+                'factory': Web3.to_checksum_address('0x420DD381b31aEf6683db6B902084cB0FFECe40Da')
+            }]
+            latest_block = self.w3.eth.get_block('latest')
+            deadline = latest_block.get('timestamp', 0) + 300
+            swap_func = self.aerodrome_router.functions.swapExactTokensForTokens(amount, 0, route, account, deadline)
+            try:
+                gas = swap_func.estimate_gas({'from': str(account)})
+                gas_details['sell_swap'] = gas
+                total_gas += gas
+            except Exception as e:
+                gas_details['sell_swap'] = 0
+        gas_eth = total_gas * gas_price / 1e18
+        eth_price_usd = 2500
+        gas_usd = gas_eth * eth_price_usd
+        return gas_eth, gas_usd, gas_details
+
+    def auto_convert_non_weth_to_weth(self, min_swap_usd=1.0):
+        """Auto-convert any non-WETH token balances (USDC, bsdETH, etc.) back to WETH if balance > min_swap_usd"""
+        eth_price_usd = 2500
+        tokens_to_check = ['USDC', 'bsdETH']  # Add more as needed
+        for symbol in tokens_to_check:
+            token_address = TOKEN_ADDRESSES.get(symbol)
+            if not token_address or token_address == WETH_BASE:
+                continue
+            balance = self.check_token_balance(token_address)
+            if symbol == 'USDC':
+                decimals = 6
+                price_usd = 1
+            else:
+                decimals = 18
+                price_usd = eth_price_usd
+            balance_float = balance / (10 ** decimals)
+            balance_usd = balance_float * price_usd
+            print(f"[DEBUG] {symbol} balance before conversion: {balance_float:.8f} ({balance_usd:.2f} USD)")
+            if balance_usd >= min_swap_usd:
+                print(f"🔄 Auto-converting {balance_float:.6f} {symbol} (${balance_usd:.2f}) to WETH...")
+                approve_success = self.approve_token(token_address, self.uniswap_router.address, balance)
+                if not approve_success:
+                    print(f"❌ Approval failed for {symbol}, skipping conversion.")
+                    continue
+                tx_hash = self.execute_uniswap_swap(token_address, WETH_BASE, balance, 0, 3000)
+                if tx_hash:
+                    print(f"✅ Uniswap swap sent: {tx_hash}")
+                    # Wait for confirmation (optional: could add a wait here)
+                    # Check balance after swap
+                    new_balance = self.check_token_balance(token_address)
+                    new_balance_float = new_balance / (10 ** decimals)
+                    print(f"[DEBUG] {symbol} balance after conversion: {new_balance_float:.8f}")
+                    if new_balance < 1:  # Allow for dust
+                        print(f"✅ Auto-converted all {symbol} to WETH!")
+                    else:
+                        print(f"⚠️  {symbol} balance remains after swap: {new_balance_float:.8f}")
+                else:
+                    print(f"❌ Swap failed for {symbol}")
+
+    def print_balances(self):
+        """Print all token balances in the wallet for tracked tokens"""
+        print("\n📊 Wallet Balances:")
+        for symbol, address in TOKEN_ADDRESSES.items():
+            try:
+                balance = self.check_token_balance(address)
+                if symbol == 'USDC':
+                    decimals = 6
+                else:
+                    decimals = 18
+                balance_float = balance / (10 ** decimals)
+                print(f"   {symbol}: {balance_float:.6f}")
+            except Exception as e:
+                print(f"   {symbol}: Error - {e}")
 
 async def get_uniswap_prices():
     """Get all Uniswap v3 pool prices with enhanced monitoring"""
@@ -1675,8 +1879,53 @@ def estimate_profit(buy_price, sell_price, eth_amount=DEFAULT_ETH_AMOUNT, eth_pr
         'is_profitable': net_profit_usd > MIN_PROFIT_THRESHOLD_USD
     }
 
+async def monitor_once(executor):
+    print("\n📊 Fetching prices from DEXes...")
+    uniswap_prices = await get_uniswap_prices()
+    sushiswap_prices = await get_sushiswap_prices()
+    aerodrome_prices = await get_aerodrome_prices()
+    print(f"📊 Found {len(uniswap_prices)} Uniswap pools")
+    print(f"📊 Found {len(sushiswap_prices)} SushiSwap pools")
+    print(f"📊 Found {len(aerodrome_prices)} Aerodrome pools")
+    print("🔍 Analyzing arbitrage opportunities...")
+    opportunities = find_arbitrage_opportunities(uniswap_prices, sushiswap_prices, aerodrome_prices)
+    if opportunities:
+        print(f"\n🔥 Found {len(opportunities)} executable arbitrage opportunities:")
+        print("-" * 80)
+        for i, opp in enumerate(opportunities[:5]):  # Show top 5
+            analysis = opp['profit_analysis']
+            strategy = opp.get('strategy', 'regular')
+            print(f"{i+1}. {opp['pair']} ({strategy.upper()})")
+            print(f"   Buy on {opp['buy_dex']} @ {opp['buy_price']:.6f}")
+            print(f"   Sell on {opp['sell_dex']} @ {opp['sell_price']:.6f}")
+            print(f"   Profit: {opp['profit_pct']:.2f}%")
+            if strategy == 'flash_loan':
+                print(f"   Flash Loan Profit: ${analysis['flash_loan_profit']:.2f}")
+                print(f"   Flash Loan Amount: ${analysis['flash_loan_amount_usd']:,.0f}")
+                print(f"   Flash Loan Fee: ${analysis['flash_loan_fee']:.2f}")
+            else:
+                print(f"   Regular Profit: ${analysis['regular_profit']:.2f}")
+            print(f"   Net Profit: ${analysis['net_profit_usd']:.2f}")
+            if EXECUTION_MODE and i == 0:
+                print(f"\n🎯 Executing opportunity: {opp['pair']}")
+                print(f"   Strategy: {strategy.upper()}")
+                print(f"💰 Using REGULAR arbitrage for {opp['pair']}")
+                success = executor.execute_arbitrage(opp)
+                if success:
+                    print("✅ Arbitrage executed successfully!")
+                else:
+                    print("❌ Arbitrage execution failed")
+                break  # Only execute one per cycle
+    else:
+        print("❌ No executable arbitrage opportunities found")
+    print("\n🏁 Run completed! Printing summary...")
+    print(f"   - Opportunities found: {len(opportunities)}")
+    print(f"   - Flash loan enabled: {FLASH_LOAN_ENABLED}")
+    print(f"   - Execution mode: {'LIVE' if EXECUTION_MODE else 'SIMULATION'}")
+    print(f"   - Safe mode: {SAFE_MODE}")
+
 async def monitor():
-    """Enhanced monitoring loop with real-time execution capabilities - RUN ONCE VERSION"""
+    """Single-run monitoring for arbitrage opportunities"""
     executor = ArbitrageExecutor(PRIVATE_KEY)
     print(f"🔧 Execution Mode: {'LIVE' if EXECUTION_MODE else 'SIMULATION'}")
     print(f"📊 Simulation Mode: {'ENABLED' if SIMULATION_MODE else 'DISABLED'}")
@@ -1684,68 +1933,12 @@ async def monitor():
     print(f"📊 Profit Range: {MIN_PROFIT_PCT}%-{MAX_PROFIT_PCT}%")
     print(f"💧 Min Liquidity: ${MIN_LIQUIDITY_USD:,.0f}")
     print(f"🛡️  Safe Mode: {'ENABLED' if SAFE_MODE else 'DISABLED'}")
-    print(f"🚀 Flash Loan Enabled: {'YES' if FLASH_LOAN_ENABLED else 'NO'}")
-    if SAFE_MODE:
-        print(f"⚠️  SAFE TESTING MODE:")
-        print(f"   - Max position size: $10")
-        print(f"   - Max profit: 20%")
-        print(f"   - Only safe tokens allowed")
-        print(f"   - Current position size: ${POSITION_SIZE_USD}")
-    if SIMULATION_MODE:
-        print(f"🎮 SIMULATION MODE:")
-        print(f"   - No real transactions will be sent")
-        print(f"   - All operations will be simulated")
-        print(f"   - Safe for testing without risk")
-    if executor.account:
-        executor.check_available_tokens()
-    print("\n" + "="*60)
-    print("🚀 Flash Loan Arbitrage Bot - Single Run")
-    print("="*60)
+    print(f"🚀 Flash Loan Enabled: {FLASH_LOAN_ENABLED}")
+    print("\nStarting single-run monitoring...\n")
     try:
-        print("\n📊 Fetching prices from DEXes...")
-        uniswap_prices = await get_uniswap_prices()
-        sushiswap_prices = await get_sushiswap_prices()
-        aerodrome_prices = await get_aerodrome_prices()
-        print(f"📊 Found {len(uniswap_prices)} Uniswap pools")
-        print(f"📊 Found {len(sushiswap_prices)} SushiSwap pools")
-        print(f"📊 Found {len(aerodrome_prices)} Aerodrome pools")
-        print("🔍 Analyzing arbitrage opportunities...")
-        opportunities = find_arbitrage_opportunities(uniswap_prices, sushiswap_prices, aerodrome_prices)
-        if opportunities:
-            print(f"\n🔥 Found {len(opportunities)} executable arbitrage opportunities:")
-            print("-" * 80)
-            for i, opp in enumerate(opportunities[:5]):  # Show top 5
-                analysis = opp['profit_analysis']
-                strategy = opp.get('strategy', 'regular')
-                print(f"{i+1}. {opp['pair']} ({strategy.upper()})")
-                print(f"   Buy on {opp['buy_dex']} @ {opp['buy_price']:.6f}")
-                print(f"   Sell on {opp['sell_dex']} @ {opp['sell_price']:.6f}")
-                print(f"   Profit: {opp['profit_pct']:.2f}%")
-                if strategy == 'flash_loan':
-                    print(f"   Flash Loan Profit: ${analysis['flash_loan_profit']:.2f}")
-                    print(f"   Flash Loan Amount: ${analysis['flash_loan_amount_usd']:,.0f}")
-                    print(f"   Flash Loan Fee: ${analysis['flash_loan_fee']:.2f}")
-                else:
-                    print(f"   Regular Profit: ${analysis['regular_profit']:.2f}")
-                print(f"   Net Profit: ${analysis['net_profit_usd']:.2f}")
-                if EXECUTION_MODE:
-                    print(f"\n🎯 Executing opportunity: {opp['pair']}")
-                    print(f"   Strategy: {strategy.upper()}")
-                    print(f"💰 Using REGULAR arbitrage for {opp['pair']}")
-                    success = executor.execute_arbitrage(opp)
-                    if success:
-                        print("✅ Arbitrage executed successfully!")
-                    else:
-                        print("❌ Arbitrage execution failed")
-        else:
-            print("❌ No executable arbitrage opportunities found")
-        print("\n🏁 Run completed! Printing summary...")
-        print(f"   - Opportunities found: {len(opportunities)}")
-        print(f"   - Flash loan enabled: {FLASH_LOAN_ENABLED}")
-        print(f"   - Execution mode: {'LIVE' if EXECUTION_MODE else 'SIMULATION'}")
-        print(f"   - Safe mode: {SAFE_MODE}")
+        await monitor_once(executor)
     except Exception as e:
-        print(f"[ERROR] Exception in monitoring run: {e}")
+        print(f"❌ Error in monitor: {e}")
 
 if __name__ == "__main__":
     asyncio.run(monitor())

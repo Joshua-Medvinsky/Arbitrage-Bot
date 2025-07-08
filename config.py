@@ -31,7 +31,7 @@ FLASH_LOAN_ENABLED = os.getenv("FLASH_LOAN_ENABLED", "False").lower() == "true"
 # Position Sizing
 POSITION_SIZE_USD = float(os.getenv("POSITION_SIZE_USD", "5"))
 MIN_PROFIT_PCT = float(os.getenv("MIN_PROFIT_PCT", "1.0"))
-MAX_PROFIT_PCT = float(os.getenv("MAX_PROFIT_PCT", "20.0"))
+MAX_PROFIT_PCT = float(os.getenv("MAX_PROFIT_PCT", "75.0"))
 
 # Risk Management
 MIN_LIQUIDITY_USD = float(os.getenv("MIN_LIQUIDITY_USD", "100000"))
