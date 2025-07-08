@@ -18,15 +18,15 @@ AERODROME_SUBGRAPH = os.getenv("AERODROME_SUBGRAPH")
 UNISWAP_API_KEY = os.getenv("UNISWAP_API_KEY")
 
 # Real-time execution settings
-EXECUTION_MODE = False  # DISABLED - Set to False for safety
-SIMULATION_MODE = True   # ENABLED - Set to True for simulation only
+EXECUTION_MODE = True  # DISABLED - Set to False for safety
+SIMULATION_MODE = False   # ENABLED - Set to True for simulation only
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")  # Your wallet private key
 MIN_LIQUIDITY_USD = 100000  # Increased to $100k liquidity for safety
 MAX_PROFIT_PCT = 20.0  # Reduced to 20% max profit for realistic opportunities
 MIN_PROFIT_PCT = 0.1  # Lowered to 0.1% minimum for better opportunities
 MAX_SLIPPAGE = 0.02  # Increased to 2% slippage for testing
 # Update position size for testing
-POSITION_SIZE_USD = 1.0  # REDUCED to $1 for safety - NO LIVE TRADING
+POSITION_SIZE_USD = 10.0  # Set to $10 for live run
 SAFE_MODE = True  # ENABLE safe mode to prevent losses
 
 w3 = Web3(Web3.HTTPProvider(WEB3_PROVIDER))
@@ -1502,69 +1502,34 @@ def check_and_convert_eth_if_needed(executor, input_token_address, input_token_s
 def find_arbitrage_opportunities(uniswap_prices, sushiswap_prices, aerodrome_prices):
     """Find arbitrage opportunities with enhanced analysis"""
     opportunities = []
-    
     all_prices = {
         'Uniswap': uniswap_prices,
         'SushiSwap': sushiswap_prices,
         'Aerodrome': aerodrome_prices
     }
-    
     print(f"Uniswap pairs: {list(uniswap_prices.keys())}")
     print(f"SushiSwap pairs: {list(sushiswap_prices.keys())[:5]}...")
     print(f"Aerodrome pairs: {list(aerodrome_prices.keys())[:5]}...")
-    
     all_pairs = set()
     for dex_prices in all_prices.values():
         all_pairs.update(dex_prices.keys())
-    
     print(f"Total unique pairs found: {len(all_pairs)}")
-    
-    uniswap_pairs = set(uniswap_prices.keys())
-    sushiswap_pairs = set(sushiswap_prices.keys())
-    aerodrome_pairs = set(aerodrome_prices.keys())
-    
-    common_uni_sushi = uniswap_pairs.intersection(sushiswap_pairs)
-    common_uni_aero = uniswap_pairs.intersection(aerodrome_pairs)
-    common_sushi_aero = sushiswap_pairs.intersection(aerodrome_pairs)
-    
-    print(f"Common Uniswap-SushiSwap pairs: {list(common_uni_sushi)}")
-    print(f"Common Uniswap-Aerodrome pairs: {list(common_uni_aero)}")
-    print(f"Common SushiSwap-Aerodrome pairs: {list(common_sushi_aero)}")
-    
-    # FORCE: Only consider WETH/USDC pairs for now
-    allowed_pairs = ['WETH/USDC', 'USDC/WETH']
-    print(f"🔒 FORCED: Only considering pairs: {allowed_pairs}")
-    
+    # Allow any pair where WETH is one of the tokens
+    def is_weth_pair(pair):
+        return 'WETH' in pair.split('/')
     # Check what tokens we have available
     available_tokens = ['WETH', 'USDC']  # We know we have these
     print(f"Available tokens for arbitrage: {available_tokens}")
-    
-    # DEBUG: Check WETH/USDC specifically
-    print(f"\n🔍 DEBUG: Checking WETH/USDC prices:")
-    if 'WETH/USDC' in uniswap_prices:
-        print(f"   Uniswap WETH/USDC: {uniswap_prices['WETH/USDC']}")
-    if 'WETH/USDC' in aerodrome_prices:
-        print(f"   Aerodrome WETH/USDC: {aerodrome_prices['WETH/USDC']}")
-    if 'USDC/WETH' in uniswap_prices:
-        print(f"   Uniswap USDC/WETH: {uniswap_prices['USDC/WETH']}")
-    if 'USDC/WETH' in aerodrome_prices:
-        print(f"   Aerodrome USDC/WETH: {aerodrome_prices['USDC/WETH']}")
-    
     for pair in all_pairs:
-        # FORCE: Only allow WETH/USDC pairs
-        if pair not in allowed_pairs:
-            print(f"Skipping {pair} - not in allowed pairs")
+        if not is_weth_pair(pair):
+            print(f"Skipping {pair} - not a WETH pair")
             continue
-            
         # Skip weETH/WETH for now due to token compatibility issues
         if 'weETH' in pair:
             continue
-            
         # Get actual token addresses from the subgraph data
         token0_address = None
         token1_address = None
-        
-        # Try to get addresses from Uniswap data first
         if pair in uniswap_prices:
             token0_address = uniswap_prices[pair]['token0']
             token1_address = uniswap_prices[pair]['token1']
@@ -1574,80 +1539,50 @@ def find_arbitrage_opportunities(uniswap_prices, sushiswap_prices, aerodrome_pri
         elif pair in sushiswap_prices:
             token0_address = sushiswap_prices[pair]['token0']
             token1_address = sushiswap_prices[pair]['token1']
-        
-        # Skip if we couldn't get addresses or they're the same
         if not token0_address or not token1_address or token0_address == token1_address:
             print(f"Skipping {pair} - invalid token addresses")
             continue
-        
-        # Check if we have the input token for this pair
         pair_tokens = pair.split('/')
         token0_symbol, token1_symbol = pair_tokens[0], pair_tokens[1]
-        
-        # Determine which token we would use as input (prioritize WETH/USDC)
         input_token_symbol = None
         if token0_symbol in available_tokens:
             input_token_symbol = token0_symbol
         elif token1_symbol in available_tokens:
             input_token_symbol = token1_symbol
-        
         if not input_token_symbol:
             print(f"Skipping {pair} - no available input token")
             continue
-            
         # --- Normalize price direction ---
-        # Always compare as USDC per WETH
         pair_prices = {}
         for dex_name, dex_prices in all_prices.items():
             if pair in dex_prices:
-                # If pair is WETH/USDC, price is as given
-                # If pair is USDC/WETH, invert the price
-                if pair == 'WETH/USDC':
-                    # If price < 10, it's likely WETH per USDC, so invert
-                    price = dex_prices[pair]['price']
-                    if price < 10:
-                        price = 1 / price if price > 0 else 0
-                    pair_prices[dex_name] = price
-                elif pair == 'USDC/WETH':
-                    price = dex_prices[pair]['price']
-                    pair_prices[dex_name] = price
-        # Force Uniswap fee tier 100 for WETH/USDC
-        fee_tier = 100 if pair in ['WETH/USDC', 'USDC/WETH'] else uniswap_prices[pair]['fee_tier'] if pair in uniswap_prices else None
+                price = dex_prices[pair]['price']
+                pair_prices[dex_name] = price
+        fee_tier = 100 if 'WETH' in pair else uniswap_prices[pair]['fee_tier'] if pair in uniswap_prices else None
         print(f"[DEBUG] Forcing Uniswap fee tier for {pair}: {fee_tier}")
-        
         print(f"\n🔍 DEBUG: Analyzing {pair}:")
-        print(f"   Prices (USDC per WETH): {pair_prices}")
-        
+        print(f"   Prices: {pair_prices}")
         if len(pair_prices) >= 2:
             prices = list(pair_prices.values())
             min_price = min(prices)
             max_price = max(prices)
-            
             print(f"   Min price: {min_price}")
             print(f"   Max price: {max_price}")
-            
             if max_price > min_price and min_price > 0:
                 buy_dex = [k for k, v in pair_prices.items() if v == min_price][0]
                 sell_dex = [k for k, v in pair_prices.items() if v == max_price][0]
-                
                 profit_pct = ((max_price - min_price) / min_price) * 100
                 print(f"   Profit: {profit_pct:.2f}%")
                 print(f"   Buy on: {buy_dex}")
                 print(f"   Sell on: {sell_dex}")
-                
-                # Realistic thresholds for executable arbitrage
                 if MIN_PROFIT_PCT <= profit_pct <= MAX_PROFIT_PCT:
                     print(f"   ✅ Profit within range ({MIN_PROFIT_PCT}%-{MAX_PROFIT_PCT}%)")
-                    # Enhanced profit analysis with flash loan capabilities
                     profit_analysis = estimate_flash_loan_profit(min_price, max_price, pair)
-                    
                     if profit_analysis['is_profitable']:
                         print(f"   ✅ Profitable after costs")
-                        # Store pool addresses for live price checking
                         uniswap_pool_address = uniswap_prices[pair]['pool_id'] if pair in uniswap_prices else None
                         sushiswap_pair_address = sushiswap_prices[pair]['pair_address'] if pair in sushiswap_prices else None
                         aerodrome_pool_address = aerodrome_prices[pair]['pool_id'] if pair in aerodrome_prices else None
-                        
                         opportunities.append({
                             'pair': pair,
                             'buy_dex': buy_dex,
@@ -1659,11 +1594,11 @@ def find_arbitrage_opportunities(uniswap_prices, sushiswap_prices, aerodrome_pri
                             'strategy': 'flash_loan' if profit_analysis['flash_loan_profit'] > profit_analysis['regular_profit'] else 'regular',
                             'uniswap_fee_tier': fee_tier,
                             'sushiswap_fee_tier': sushiswap_prices[pair]['fee_tier'] if pair in sushiswap_prices else None,
-                            'aerodrome_fee_tier': 0 if pair in aerodrome_prices else None,  # Always 0 for Aerodrome
+                            'aerodrome_fee_tier': 0 if pair in aerodrome_prices else None,
                             'uniswap_pool_address': uniswap_pool_address,
                             'sushiswap_pair_address': sushiswap_pair_address,
                             'aerodrome_pool_address': aerodrome_pool_address,
-                            'priority': pair in allowed_pairs,  # Mark priority pairs
+                            'priority': 'WETH' in pair,
                             'token0_address': token0_address,
                             'token1_address': token1_address,
                             'input_token_symbol': input_token_symbol
@@ -1676,10 +1611,7 @@ def find_arbitrage_opportunities(uniswap_prices, sushiswap_prices, aerodrome_pri
                 print(f"   ❌ No price difference or invalid prices")
         else:
             print(f"   ❌ Not enough DEXes have this pair")
-    
-    # Sort by priority first, then by profit
     opportunities.sort(key=lambda x: (not x.get('priority', False), x['profit_analysis']['net_profit_usd']), reverse=True)
-    
     return opportunities
 
 def estimate_flash_loan_profit(buy_price, sell_price, pair_info, eth_amount=10.0, eth_price_usd=2500):
@@ -1745,9 +1677,7 @@ def estimate_profit(buy_price, sell_price, eth_amount=DEFAULT_ETH_AMOUNT, eth_pr
 
 async def monitor():
     """Enhanced monitoring loop with real-time execution capabilities - RUN ONCE VERSION"""
-    # Initialize executor
     executor = ArbitrageExecutor(PRIVATE_KEY)
-    
     print(f"🔧 Execution Mode: {'LIVE' if EXECUTION_MODE else 'SIMULATION'}")
     print(f"📊 Simulation Mode: {'ENABLED' if SIMULATION_MODE else 'DISABLED'}")
     print(f"💰 Position Size: ${POSITION_SIZE_USD:,.0f}")
@@ -1755,91 +1685,67 @@ async def monitor():
     print(f"💧 Min Liquidity: ${MIN_LIQUIDITY_USD:,.0f}")
     print(f"🛡️  Safe Mode: {'ENABLED' if SAFE_MODE else 'DISABLED'}")
     print(f"🚀 Flash Loan Enabled: {'YES' if FLASH_LOAN_ENABLED else 'NO'}")
-    
     if SAFE_MODE:
         print(f"⚠️  SAFE TESTING MODE:")
         print(f"   - Max position size: $10")
         print(f"   - Max profit: 20%")
         print(f"   - Only safe tokens allowed")
         print(f"   - Current position size: ${POSITION_SIZE_USD}")
-    
     if SIMULATION_MODE:
         print(f"🎮 SIMULATION MODE:")
         print(f"   - No real transactions will be sent")
         print(f"   - All operations will be simulated")
         print(f"   - Safe for testing without risk")
-    
-    # Check available tokens first
     if executor.account:
         executor.check_available_tokens()
-    
     print("\n" + "="*60)
-    print("🚀 Testing Flash Loan Arbitrage Bot - Single Run")
+    print("🚀 Flash Loan Arbitrage Bot - Single Run")
     print("="*60)
-    
-    # Get prices from all DEXes
-    print("📊 Fetching prices from DEXes...")
-    uniswap_prices = await get_uniswap_prices()
-    sushiswap_prices = await get_sushiswap_prices()
-    aerodrome_prices = await get_aerodrome_prices()
-    
-    print(f"📊 Found {len(uniswap_prices)} Uniswap pools")
-    print(f"📊 Found {len(sushiswap_prices)} SushiSwap pools")
-    print(f"📊 Found {len(aerodrome_prices)} Aerodrome pools")
-    
-    # Find arbitrage opportunities
-    print("🔍 Analyzing arbitrage opportunities...")
-    opportunities = find_arbitrage_opportunities(uniswap_prices, sushiswap_prices, aerodrome_prices)
-    
-    if opportunities:
-        print(f"\n🔥 Found {len(opportunities)} executable arbitrage opportunities:")
-        print("-" * 80)
-        
-        for i, opp in enumerate(opportunities[:5]):  # Show top 5
-            analysis = opp['profit_analysis']
-            strategy = opp.get('strategy', 'regular')
-            
-            print(f"{i+1}. {opp['pair']} ({strategy.upper()})")
-            print(f"   Buy on {opp['buy_dex']} @ {opp['buy_price']:.6f}")
-            print(f"   Sell on {opp['sell_dex']} @ {opp['sell_price']:.6f}")
-            print(f"   Profit: {opp['profit_pct']:.2f}%")
-            
-            if strategy == 'flash_loan':
-                print(f"   Flash Loan Profit: ${analysis['flash_loan_profit']:.2f}")
-                print(f"   Flash Loan Amount: ${analysis['flash_loan_amount_usd']:,.0f}")
-                print(f"   Flash Loan Fee: ${analysis['flash_loan_fee']:.2f}")
-            else:
-                print(f"   Regular Profit: ${analysis['regular_profit']:.2f}")
-            
-            print(f"   Net Profit: ${analysis['net_profit_usd']:.2f}")
-            
-            # Execute the best opportunity
-            if i == 0 and EXECUTION_MODE:
-                print(f"\n🎯 Executing best opportunity: {opp['pair']}")
-                print(f"   Strategy: {strategy.upper()}")
-                
-                # For now, always use regular arbitrage for testing
-                print(f"💰 Using REGULAR arbitrage for {opp['pair']}")
-                success = executor.execute_arbitrage(opp)
-                
-                if success:
-                    print("✅ Arbitrage executed successfully!")
+    try:
+        print("\n📊 Fetching prices from DEXes...")
+        uniswap_prices = await get_uniswap_prices()
+        sushiswap_prices = await get_sushiswap_prices()
+        aerodrome_prices = await get_aerodrome_prices()
+        print(f"📊 Found {len(uniswap_prices)} Uniswap pools")
+        print(f"📊 Found {len(sushiswap_prices)} SushiSwap pools")
+        print(f"📊 Found {len(aerodrome_prices)} Aerodrome pools")
+        print("🔍 Analyzing arbitrage opportunities...")
+        opportunities = find_arbitrage_opportunities(uniswap_prices, sushiswap_prices, aerodrome_prices)
+        if opportunities:
+            print(f"\n🔥 Found {len(opportunities)} executable arbitrage opportunities:")
+            print("-" * 80)
+            for i, opp in enumerate(opportunities[:5]):  # Show top 5
+                analysis = opp['profit_analysis']
+                strategy = opp.get('strategy', 'regular')
+                print(f"{i+1}. {opp['pair']} ({strategy.upper()})")
+                print(f"   Buy on {opp['buy_dex']} @ {opp['buy_price']:.6f}")
+                print(f"   Sell on {opp['sell_dex']} @ {opp['sell_price']:.6f}")
+                print(f"   Profit: {opp['profit_pct']:.2f}%")
+                if strategy == 'flash_loan':
+                    print(f"   Flash Loan Profit: ${analysis['flash_loan_profit']:.2f}")
+                    print(f"   Flash Loan Amount: ${analysis['flash_loan_amount_usd']:,.0f}")
+                    print(f"   Flash Loan Fee: ${analysis['flash_loan_fee']:.2f}")
                 else:
-                    print("❌ Arbitrage execution failed")
-                
-                # Only execute one opportunity and exit
-                break
+                    print(f"   Regular Profit: ${analysis['regular_profit']:.2f}")
+                print(f"   Net Profit: ${analysis['net_profit_usd']:.2f}")
+                if EXECUTION_MODE:
+                    print(f"\n🎯 Executing opportunity: {opp['pair']}")
+                    print(f"   Strategy: {strategy.upper()}")
+                    print(f"💰 Using REGULAR arbitrage for {opp['pair']}")
+                    success = executor.execute_arbitrage(opp)
+                    if success:
+                        print("✅ Arbitrage executed successfully!")
+                    else:
+                        print("❌ Arbitrage execution failed")
         else:
-            print("❌ No executable opportunities found or execution disabled")
-    else:
-        print("❌ No executable arbitrage opportunities found")
-    
-    print("\n🏁 Test run completed!")
-    print("📊 Summary:")
-    print(f"   - Opportunities found: {len(opportunities)}")
-    print(f"   - Flash loan enabled: {FLASH_LOAN_ENABLED}")
-    print(f"   - Execution mode: {'LIVE' if EXECUTION_MODE else 'SIMULATION'}")
-    print(f"   - Safe mode: {SAFE_MODE}")
+            print("❌ No executable arbitrage opportunities found")
+        print("\n🏁 Run completed! Printing summary...")
+        print(f"   - Opportunities found: {len(opportunities)}")
+        print(f"   - Flash loan enabled: {FLASH_LOAN_ENABLED}")
+        print(f"   - Execution mode: {'LIVE' if EXECUTION_MODE else 'SIMULATION'}")
+        print(f"   - Safe mode: {SAFE_MODE}")
+    except Exception as e:
+        print(f"[ERROR] Exception in monitoring run: {e}")
 
 if __name__ == "__main__":
     asyncio.run(monitor())
