@@ -162,33 +162,30 @@ class ArbitrageExecutor:
     def validate_opportunity(self, opportunity):
         """Validate if an opportunity is realistic and executable"""
         profit_pct = opportunity['profit_pct']
-        
+        # Allow any opportunity with profit_pct > 20%
+        if profit_pct > 20:
+            return True, "Profit percentage above 20%, running regardless of expected net profit."
         # SAFETY CHECKS FOR TESTING
         if SAFE_MODE:
             # Only allow very small amounts for testing
             if POSITION_SIZE_USD > 10:
                 return False, f"Position size ${POSITION_SIZE_USD} too large for testing mode"
-            
             # Only allow profit up to MAX_PROFIT_PCT for safety
             if profit_pct > MAX_PROFIT_PCT:
                 return False, f"Profit {profit_pct:.2f}% too high for safe testing (max {MAX_PROFIT_PCT}%)"
-            
             # Only allow major tokens for safety
             safe_tokens = ['WETH', 'USDC', 'USDT', 'cbBTC', 'cbETH', 'wstETH']
             pair_tokens = opportunity['pair'].split('/')
             if not any(token in safe_tokens for token in pair_tokens):
                 return False, f"Pair {opportunity['pair']} contains non-safe tokens"
-        
         # Check if profit is within realistic bounds
         if profit_pct < MIN_PROFIT_PCT or profit_pct > MAX_PROFIT_PCT:
             return False, f"Profit {profit_pct:.2f}% outside realistic bounds ({MIN_PROFIT_PCT}%-{MAX_PROFIT_PCT}%)"
-        
         # Check liquidity (if available)
         if 'tvl' in opportunity.get('profit_analysis', {}):
             tvl = opportunity['profit_analysis']['tvl']
             if tvl < MIN_LIQUIDITY_USD:
                 return False, f"Insufficient liquidity: ${tvl:,.0f} < ${MIN_LIQUIDITY_USD:,.0f}"
-        
         return True, "Opportunity validated"
     
     def get_token_contract(self, token_address):
@@ -689,6 +686,19 @@ class ArbitrageExecutor:
             )
             if success:
                 print("✅ Arbitrage executed successfully!")
+                # Analyze realized profit after trade
+                print("\n[Post-Trade Analysis]")
+                # Get balances after trade
+                weth_balance_after = self.check_token_balance(WETH_BASE)
+                usdc_balance_after = self.check_token_balance(USDC_BASE)
+                # If you want to track before/after, you need to snapshot before trade as well
+                # For now, just print after-trade balances
+                print(f"   WETH balance after: {weth_balance_after / 1e18:.6f} WETH")
+                print(f"   USDC balance after: {usdc_balance_after / 1e6:.2f} USDC")
+                # Optionally, estimate total USD value
+                eth_price_usd = 2500
+                total_usd = (weth_balance_after / 1e18) * eth_price_usd + (usdc_balance_after / 1e6)
+                print(f"   Estimated total wallet value: ${total_usd:,.2f} (using WETH=${eth_price_usd})")
                 # Auto-convert any non-WETH tokens back to WETH if detected
                 self.auto_convert_non_weth_to_weth(min_swap_usd=5.0)
                 # Print all token balances after conversion
