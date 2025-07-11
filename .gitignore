@@ -106,6 +106,27 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
+# Rust/Tauri build artifacts
+target/
+frontend/src-tauri/target/
+src-tauri/target/
+
+# Tauri WiX build files
+frontend/src-tauri/target/
+*.msi
+*.deb
+*.rpm
+*.AppImage
+*.dmg
+
+# Build outputs
+dist/
+build/
+out/
+
+# PyInstaller
+*.spec
+
 # Project specific
 contracts/lib/
 contracts/out/
