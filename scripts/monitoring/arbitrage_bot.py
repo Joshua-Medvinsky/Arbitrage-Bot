@@ -17,11 +17,12 @@ load_dotenv()
 WEB3_PROVIDER = os.getenv("WEB3_PROVIDER")
 UNISWAP_V3_SUBGRAPH = os.getenv("UNISWAP_V3_SUBGRAPH")
 AERODROME_SUBGRAPH = os.getenv("AERODROME_SUBGRAPH")
+BALANCER_V2_SUBGRAPH = os.getenv("BALANCER_V2_SUBGRAPH")
 UNISWAP_API_KEY = os.getenv("UNISWAP_API_KEY")
 
 # Real-time execution settings
-EXECUTION_MODE = True  # DISABLED - Set to False for safety
-SIMULATION_MODE = False   # ENABLED - Set to True for simulation only
+EXECUTION_MODE = False  # DISABLED - Set to False for safety
+SIMULATION_MODE = True   # ENABLED - Set to True for simulation only
 PRIVATE_KEY = os.getenv("PRIVATE_KEY")  # Your wallet private key
 MIN_LIQUIDITY_USD = 100000  # Increased to $100k liquidity for safety
 MAX_PROFIT_PCT = 300.0  # Reduced to 20% max profit for realistic opportunities
@@ -130,6 +131,12 @@ AERODROME_ROUTER_ABI = [
     {"inputs":[{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMin","type":"uint256"},{"components":[{"internalType":"address","name":"from","type":"address"},{"internalType":"address","name":"to","type":"address"},{"internalType":"bool","name":"stable","type":"bool"},{"internalType":"address","name":"factory","type":"address"}],"internalType":"struct IRouter.Route[]","name":"routes","type":"tuple[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapExactTokensForTokens","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"nonpayable","type":"function"}
 ]
 
+# Balancer V2 Vault for execution (Base network)
+BALANCER_V2_VAULT = Web3.to_checksum_address("0xBA12222222228d8Ba445958a75a0704d566BF2C8")
+BALANCER_V2_VAULT_ABI = [
+    {"inputs":[{"components":[{"internalType":"bytes32","name":"poolId","type":"bytes32"},{"internalType":"enum IVault.SwapKind","name":"kind","type":"uint8"},{"internalType":"contract IAsset","name":"assetIn","type":"address"},{"internalType":"contract IAsset","name":"assetOut","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"},{"internalType":"bytes","name":"userData","type":"bytes"}],"internalType":"struct IVault.SingleSwap","name":"singleSwap","type":"tuple"},{"components":[{"internalType":"address","name":"sender","type":"address"},{"internalType":"bool","name":"fromInternalBalance","type":"bool"},{"internalType":"address payable","name":"recipient","type":"address"},{"internalType":"bool","name":"toInternalBalance","type":"bool"}],"internalType":"struct IVault.FundManagement","name":"funds","type":"tuple"},{"internalType":"uint256","name":"limit","type":"uint256"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swap","outputs":[{"internalType":"uint256","name":"amountCalculated","type":"uint256"}],"stateMutability":"payable","type":"function"}
+]
+
 class ArbitrageExecutor:
     def __init__(self, private_key=None):
         self.w3 = w3
@@ -143,6 +150,7 @@ class ArbitrageExecutor:
         # Initialize contracts
         self.uniswap_router = w3.eth.contract(address=UNISWAP_V3_ROUTER, abi=UNISWAP_V3_ROUTER_ABI)
         self.aerodrome_router = w3.eth.contract(address=AERODROME_ROUTER, abi=AERODROME_ROUTER_ABI)
+        self.balancer_vault = w3.eth.contract(address=BALANCER_V2_VAULT, abi=BALANCER_V2_VAULT_ABI)
         
         # Initialize flash loan contracts
         self.aave_lending_pool = w3.eth.contract(address=Web3.to_checksum_address(AAVE_LENDING_POOL), abi=AAVE_LENDING_POOL_ABI)
@@ -721,6 +729,9 @@ class ArbitrageExecutor:
             elif buy_dex == 'Aerodrome':
                 # Add approval logic if needed for Aerodrome
                 pass
+            elif buy_dex == 'Balancer V2':
+                if not self.approve_token(token0, BALANCER_V2_VAULT, amount):
+                    return False
             else:
                 print(f"❌ Unsupported DEX: {buy_dex}")
                 return False
@@ -744,6 +755,17 @@ class ArbitrageExecutor:
                     amount_in_float = amount / (10 ** decimals_in)
                     expected_usdc_out = int(amount_in_float * buy_price * (10 ** decimals_out))
                     print(f"[DEBUG] Estimated USDC out from Aerodrome buy: {expected_usdc_out}")
+                elif buy_dex == 'Balancer V2':
+                    pool_address = opportunity.get('balancer_pool_address') if opportunity else None
+                    if not self.execute_balancer_v2_swap(token0, token1, amount, amount_out_min, pool_address):
+                        return False
+                    # For Balancer V2, estimate USDC out: amount (WETH) * buy_price (USDC/WETH)
+                    buy_price = opportunity['buy_price'] if opportunity else 2532.5
+                    decimals_in = 18  # WETH
+                    decimals_out = 6  # USDC
+                    amount_in_float = amount / (10 ** decimals_in)
+                    expected_usdc_out = int(amount_in_float * buy_price * (10 ** decimals_out))
+                    print(f"[DEBUG] Estimated USDC out from Balancer V2 buy: {expected_usdc_out}")
             except Exception as e:
                 print(f"❌ Buy swap failed on {buy_dex}: {e}")
                 return False
@@ -773,6 +795,9 @@ class ArbitrageExecutor:
                 min_out = 0
                 print(f"[DEBUG] Using min_out = 0 for testing")
                 if not self.approve_token(token1, UNISWAP_V3_ROUTER, sell_amount):
+                    return False
+            elif sell_dex == 'Balancer V2':
+                if not self.approve_token(token1, BALANCER_V2_VAULT, sell_amount):
                     return False
             
             # Step 4: Execute sell swap
@@ -821,6 +846,10 @@ class ArbitrageExecutor:
                 elif sell_dex == 'Aerodrome':
                     fee = opportunity['aerodrome_fee_tier'] if opportunity and 'aerodrome_fee_tier' in opportunity else None
                     if not self.execute_aerodrome_swap(token1, token0, amount, min_out, fee):
+                        return False
+                elif sell_dex == 'Balancer V2':
+                    pool_address = opportunity.get('balancer_pool_address') if opportunity else None
+                    if not self.execute_balancer_v2_swap(token1, token0, sell_amount, min_out, pool_address):
                         return False
             except Exception as e:
                 print(f"❌ Sell swap failed on {sell_dex}: {e}")
@@ -1032,6 +1061,14 @@ class ArbitrageExecutor:
                 total_gas += gas
             except Exception as e:
                 gas_details['approve_buy'] = 0
+        elif buy_dex == 'Balancer V2':
+            approve_func = self.get_token_contract(token0).functions.approve(BALANCER_V2_VAULT, amount)
+            try:
+                gas = approve_func.estimate_gas({'from': str(account)})
+                gas_details['approve_buy'] = gas
+                total_gas += gas
+            except Exception as e:
+                gas_details['approve_buy'] = 0
         # Buy swap
         if buy_dex == 'Uniswap':
             fee = opportunity['uniswap_fee_tier'] if 'uniswap_fee_tier' in opportunity else 3000
@@ -1067,6 +1104,33 @@ class ArbitrageExecutor:
                 total_gas += gas
             except Exception as e:
                 gas_details['buy_swap'] = 0
+        elif buy_dex == 'Balancer V2':
+            # Build single swap parameters for gas estimation
+            single_swap = {
+                'sender': account,
+                'recipient': account,
+                'request': 0,
+                'tokenIn': Web3.to_checksum_address(token0),
+                'tokenOut': Web3.to_checksum_address(token1),
+                'amountIn': amount,
+                'amountOut': amount_out_min,
+                'userData': 0
+            }
+            funds = {
+                'sender': account,
+                'fromInternalBalance': False,
+                'recipient': account,
+                'toInternalBalance': False
+            }
+            latest_block = self.w3.eth.get_block('latest')
+            deadline = latest_block.get('timestamp', 0) + 300
+            swap_func = self.balancer_vault.functions.swap(single_swap, funds, amount_out_min, deadline)
+            try:
+                gas = swap_func.estimate_gas({'from': str(account)})
+                gas_details['buy_swap'] = gas
+                total_gas += gas
+            except Exception as e:
+                gas_details['buy_swap'] = 0
         # Approval for sell DEX
         if sell_dex == 'Uniswap':
             approve_func = self.get_token_contract(token1).functions.approve(UNISWAP_V3_ROUTER, amount)
@@ -1078,6 +1142,14 @@ class ArbitrageExecutor:
                 gas_details['approve_sell'] = 0
         elif sell_dex == 'Aerodrome':
             approve_func = self.get_token_contract(token1).functions.approve(AERODROME_ROUTER, amount)
+            try:
+                gas = approve_func.estimate_gas({'from': str(account)})
+                gas_details['approve_sell'] = gas
+                total_gas += gas
+            except Exception as e:
+                gas_details['approve_sell'] = 0
+        elif sell_dex == 'Balancer V2':
+            approve_func = self.get_token_contract(token1).functions.approve(BALANCER_V2_VAULT, amount)
             try:
                 gas = approve_func.estimate_gas({'from': str(account)})
                 gas_details['approve_sell'] = gas
@@ -1113,6 +1185,33 @@ class ArbitrageExecutor:
             latest_block = self.w3.eth.get_block('latest')
             deadline = latest_block.get('timestamp', 0) + 300
             swap_func = self.aerodrome_router.functions.swapExactTokensForTokens(amount, 0, route, account, deadline)
+            try:
+                gas = swap_func.estimate_gas({'from': str(account)})
+                gas_details['sell_swap'] = gas
+                total_gas += gas
+            except Exception as e:
+                gas_details['sell_swap'] = 0
+        elif sell_dex == 'Balancer V2':
+            # Build single swap parameters for gas estimation
+            single_swap = {
+                'sender': account,
+                'recipient': account,
+                'request': 0,
+                'tokenIn': Web3.to_checksum_address(token1),
+                'tokenOut': Web3.to_checksum_address(token0),
+                'amountIn': amount,
+                'amountOut': 0,
+                'userData': 0
+            }
+            funds = {
+                'sender': account,
+                'fromInternalBalance': False,
+                'recipient': account,
+                'toInternalBalance': False
+            }
+            latest_block = self.w3.eth.get_block('latest')
+            deadline = latest_block.get('timestamp', 0) + 300
+            swap_func = self.balancer_vault.functions.swap(single_swap, funds, 0, deadline)
             try:
                 gas = swap_func.estimate_gas({'from': str(account)})
                 gas_details['sell_swap'] = gas
@@ -1192,125 +1291,72 @@ class ArbitrageExecutor:
             except Exception as e:
                 print(f"   {symbol}: Error - {e}")
 
-async def get_uniswap_prices():
-    """Get all Uniswap v3 pool prices with enhanced monitoring"""
-    if not UNISWAP_V3_SUBGRAPH:
-        print("UNISWAP_V3_SUBGRAPH not configured")
-        return {}
-    
-    query = {
-        "query": """
-        {
-          pools(first: 1000, orderBy: totalValueLockedUSD, orderDirection: desc) {
-            id
-            token0 {
-              id
-              symbol
-            }
-            token1 {
-              id
-              symbol
-            }
-            token0Price
-            token1Price
-            totalValueLockedUSD
-            volumeUSD
-            feeTier
-          }
+    def execute_balancer_v2_swap(self, token_in, token_out, amount_in, amount_out_min, pool_address=None):
+        """Execute swap on Balancer V2"""
+        if not self.account:
+            raise ValueError("No account loaded")
+        
+        # Approve token if needed
+        if not self.approve_token(token_in, BALANCER_V2_VAULT, amount_in):
+            print(f"❌ Approval failed for Balancer V2 swap")
+            return False
+        
+        # Build single swap parameters
+        single_swap = {
+            'sender': self.account.address,
+            'recipient': self.account.address,
+            'request': 0,  # Single swap
+            'tokenIn': Web3.to_checksum_address(token_in),
+            'tokenOut': Web3.to_checksum_address(token_out),
+            'amountIn': amount_in,
+            'amountOut': amount_out_min,
+            'userData': 0
         }
-        """
-    }
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            headers = {
-                "Authorization": f"Bearer {UNISWAP_API_KEY}" if UNISWAP_API_KEY else "",
-                "Content-Type": "application/json"
-            }
-            async with session.post(UNISWAP_V3_SUBGRAPH, json=query, headers=headers) as resp:
-                result = await resp.json()
-                
-                print(f"Uniswap subgraph response status: {resp.status}")
-                if resp.status != 200:
-                    print(f"Uniswap subgraph error: {result}")
-                    return {}
-                
-                if result is None:
-                    print("Uniswap subgraph returned None")
-                    return {}
-                
-                pools = result.get("data", {}).get("pools", [])
-                print(f"Found {len(pools)} Uniswap pools")
-                
-                # Get more pools with offset for better coverage
-                if pools and len(pools) == 1000:
-                    print("Attempting to get more pools with offset...")
-                    try:
-                        offset_query = {
-                            "query": """
-                            {
-                              pools(first: 1000, skip: 1000, orderBy: totalValueLockedUSD, orderDirection: desc) {
-                                id
-                                token0 {
-                                  id
-                                  symbol
-                                }
-                                token1 {
-                                  id
-                                  symbol
-                                }
-                                token0Price
-                                token1Price
-                                totalValueLockedUSD
-                                volumeUSD
-                                feeTier
-                              }
-                            }
-                            """
-                        }
-                        async with session.post(UNISWAP_V3_SUBGRAPH, json=offset_query, headers=headers) as offset_resp:
-                            offset_result = await offset_resp.json()
-                            if offset_result.get("data", {}).get("pools"):
-                                pools.extend(offset_result["data"]["pools"])
-                                print(f"Added {len(offset_result['data']['pools'])} more pools (total: {len(pools)})")
-                    except Exception as e:
-                        print(f"Could not get additional pools: {e}")
-                
-                prices = {}
-                processed_count = 0
-                for i, pool in enumerate(pools):
-                    if i % 1000 == 0:
-                        print(f"Processing Uniswap pool {i}/{len(pools)}...")
-                    
-                    try:
-                        tokens = pool["token0"], pool["token1"]
-                        price = float(pool.get('token0Price', 0))
-                        tvl = float(pool.get("totalValueLockedUSD", 0))
-                        volume = float(pool.get("volumeUSD", 0))
-                        fee_tier = int(pool.get("feeTier", 3000))  # Use raw value (e.g., 100, 500, 3000)
-                        
-                        # More aggressive filtering - look for liquid pools with recent activity
-                        if price > 0 and tvl > MIN_LIQUIDITY_USD and volume > 1000:  # Higher thresholds for better opportunities
-                            pair_key = f"{tokens[0]['symbol']}/{tokens[1]['symbol']}"
-                            prices[pair_key] = {
-                                'price': price,
-                                'tvl': tvl,
-                                'volume': volume,
-                                'fee_tier': fee_tier,
-                                'pool_id': pool['id'],
-                                'token0': tokens[0]['id'],
-                                'token1': tokens[1]['id']
-                            }
-                            processed_count += 1
-                    except Exception as e:
-                        continue
-                
-                print(f"Processed {processed_count} Uniswap pools with valid prices")
-                return prices
-                
-    except Exception as e:
-        print(f"Error fetching Uniswap prices: {e}")
-        return {}
+        
+        # Build fund management parameters
+        funds = {
+            'sender': self.account.address,
+            'fromInternalBalance': False,
+            'recipient': self.account.address,
+            'toInternalBalance': False
+        }
+        
+        # Deadline: 5 minutes from now
+        latest_block = self.w3.eth.get_block('latest')
+        deadline = latest_block.get('timestamp', 0) + 300
+        
+        # Build transaction
+        swap_function = self.balancer_vault.functions.swap(
+            single_swap,
+            funds,
+            amount_out_min,  # limit
+            deadline
+        )
+        
+        nonce = self.w3.eth.get_transaction_count(self.account.address)
+        gas_price = self.w3.eth.gas_price
+        
+        tx = swap_function.build_transaction({
+            'from': self.account.address,
+            'gas': 300000,
+            'gasPrice': gas_price,
+            'nonce': nonce
+        })
+        
+        if not SIMULATION_MODE:
+            signed_tx = self.account.sign_transaction(tx)
+            tx_hash = self.w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+            print(f"✅ Balancer V2 swap sent: {tx_hash.hex()}")
+            receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+            if receipt["status"] == 1:
+                print(f"✅ Balancer V2 swap confirmed!")
+                return True
+            else:
+                print("❌ Balancer V2 swap failed")
+                return False
+        else:
+            print(f"📊 Simulation: Would swap {amount_in} tokens on Balancer V2")
+            return True
 
 async def get_aerodrome_prices():
     """Get all Aerodrome pool prices with enhanced monitoring"""
@@ -1391,6 +1437,161 @@ async def get_aerodrome_prices():
                 
     except Exception as e:
         print(f"Error fetching Aerodrome prices: {e}")
+        return {}
+
+async def get_balancer_v2_prices():
+    """Get all Balancer V2 pool prices with enhanced monitoring"""
+    if not BALANCER_V2_SUBGRAPH:
+        print("BALANCER_V2_SUBGRAPH not configured")
+        return {}
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            # Step 1: Get all pool IDs from balancers
+            print("🔍 Step 1: Fetching Balancer V2 pool IDs...")
+            pool_ids_query = {
+                "query": """
+                {
+                  balancers {
+                    id
+                    poolCount
+                    pools {
+                      id
+                    }
+                  }
+                }
+                """
+            }
+            
+            async with session.post(BALANCER_V2_SUBGRAPH, json=pool_ids_query) as resp:
+                result = await resp.json()
+                
+                print(f"Balancer V2 subgraph response status: {resp.status}")
+                if resp.status != 200:
+                    print(f"Balancer V2 subgraph error: {result}")
+                    return {}
+                
+                if result is None:
+                    print("Balancer V2 subgraph returned None")
+                    return {}
+                
+                # Extract pool IDs from balancers
+                pool_ids = []
+                balancers = result.get("data", {}).get("balancers", [])
+                for balancer in balancers:
+                    pools = balancer.get("pools", [])
+                    for pool in pools:
+                        pool_ids.append(pool["id"])
+                
+                print(f"Found {len(pool_ids)} Balancer V2 pool IDs")
+                
+                if not pool_ids:
+                    print("No pool IDs found")
+                    return {}
+                
+                # Step 2: Query each pool for details (limit to first 100 for performance)
+                print("🔍 Step 2: Fetching pool details...")
+                prices = {}
+                processed_count = 0
+                
+                # Limit to first 100 pools for performance
+                pool_ids_to_query = pool_ids[:100]
+                
+                for i, pool_id in enumerate(pool_ids_to_query):
+                    if i % 10 == 0:
+                        print(f"Processing Balancer V2 pool {i}/{len(pool_ids_to_query)}...")
+                    
+                    try:
+                        # Query individual pool details
+                        pool_query = {
+                            "query": f"""
+                            {{
+                              pool(id: "{pool_id}") {{
+                                id
+                                address
+                                poolType
+                                poolTypeVersion
+                                tokens {{
+                                  id
+                                  symbol
+                                  decimals
+                                  balance
+                                  weight
+                                }}
+                                swaps(first: 1, orderBy: timestamp, orderDirection: desc) {{
+                                  tokenAmountIn
+                                  tokenAmountOut
+                                  tokenIn
+                                  tokenOut
+                                }}
+                                totalLiquidity
+                                totalShares
+                              }}
+                            }}
+                            """
+                        }
+                        
+                        async with session.post(BALANCER_V2_SUBGRAPH, json=pool_query) as pool_resp:
+                            pool_result = await pool_resp.json()
+                            
+                            if pool_resp.status != 200:
+                                continue
+                            
+                            pool_data = pool_result.get("data", {}).get("pool")
+                            if not pool_data:
+                                continue
+                            
+                            tokens = pool_data.get("tokens", [])
+                            if len(tokens) < 2:
+                                continue
+                            
+                            # Get the first two tokens for price calculation
+                            token0 = tokens[0]
+                            token1 = tokens[1]
+                            
+                            # Calculate price based on token balances and weights
+                            balance0 = float(token0.get("balance", 0))
+                            balance1 = float(token1.get("balance", 0))
+                            weight0 = float(token0.get("weight", 0))
+                            weight1 = float(token1.get("weight", 0))
+                            
+                            if balance0 == 0 or balance1 == 0:
+                                continue
+                            
+                            # Calculate price (token1/token0)
+                            price = balance1 / balance0
+                            
+                            # Get total liquidity
+                            total_liquidity = float(pool_data.get("totalLiquidity", 0))
+                            
+                            # Estimate TVL (rough calculation)
+                            tvl = total_liquidity * 2  # Rough estimate
+                            
+                            pair_key = f"{token0['symbol']}/{token1['symbol']}"
+                            
+                            # Filter for liquid pools
+                            if 0.0001 < price < 1000000 and tvl > MIN_LIQUIDITY_USD:
+                                prices[pair_key] = {
+                                    'price': price,
+                                    'tvl': tvl,
+                                    'volume': 0,  # Balancer V2 doesn't provide volume in this query
+                                    'pool_id': pool_data['id'],
+                                    'pool_address': pool_data['address'],
+                                    'token0': token0['id'],
+                                    'token1': token1['id'],
+                                    'fee_tier': None  # Balancer V2 uses dynamic fees
+                                }
+                                processed_count += 1
+                                
+                    except Exception as e:
+                        print(f"Error processing pool {pool_id}: {e}")
+                        continue
+                
+                print(f"Processed {processed_count} Balancer V2 pools")
+                return prices
+                
+    except Exception as e:
+        print(f"Error fetching Balancer V2 prices: {e}")
         return {}
 
 # Add live price checking functions
@@ -1523,12 +1724,13 @@ def check_and_convert_eth_if_needed(executor, input_token_address, input_token_s
         print(f"   ❌ Error checking/converting token: {e}")
         return False
 
-def find_arbitrage_opportunities(uniswap_prices, aerodrome_prices, executor=None):
+def find_arbitrage_opportunities(uniswap_prices, aerodrome_prices, balancer_v2_prices, executor=None):
     """Find arbitrage opportunities with enhanced analysis"""
     opportunities = []
     all_prices = {
         'Uniswap': uniswap_prices,
-        'Aerodrome': aerodrome_prices
+        'Aerodrome': aerodrome_prices,
+        'Balancer V2': balancer_v2_prices
     }
     all_pairs = set()
     for dex_prices in all_prices.values():
@@ -1674,10 +1876,12 @@ async def monitor_once(executor):
     print("\n📊 Fetching prices from DEXes...")
     uniswap_prices = await get_uniswap_prices()
     aerodrome_prices = await get_aerodrome_prices()
+    balancer_v2_prices = await get_balancer_v2_prices()
     print(f"📊 Found {len(uniswap_prices)} Uniswap pools")
     print(f"📊 Found {len(aerodrome_prices)} Aerodrome pools")
+    print(f"📊 Found {len(balancer_v2_prices)} Balancer V2 pools")
     print("🔍 Analyzing arbitrage opportunities...")
-    opportunities = find_arbitrage_opportunities(uniswap_prices, aerodrome_prices, executor=executor)
+    opportunities = find_arbitrage_opportunities(uniswap_prices, aerodrome_prices, balancer_v2_prices, executor=executor)
     if not opportunities:
         print("❌ No executable arbitrage opportunities found")
         opportunities = []
@@ -1735,6 +1939,109 @@ async def monitor():
         await monitor_once(executor)
     except Exception as e:
         print(f"❌ Error in monitor: {e}")
+
+async def get_uniswap_prices():
+    """Get all Uniswap V3 pool prices with enhanced monitoring"""
+    if not UNISWAP_V3_SUBGRAPH:
+        print("UNISWAP_V3_SUBGRAPH not configured")
+        return {}
+    
+    query = {
+        "query": """
+        {
+          pools(first: 1000, orderBy: totalValueLockedUSD, orderDirection: desc) {
+            id
+            token0 { id symbol }
+            token1 { id symbol }
+            token0Price
+            token1Price
+            totalValueLockedUSD
+            volumeUSD
+            feeTier
+          }
+        }
+        """
+    }
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(UNISWAP_V3_SUBGRAPH, json=query) as resp:
+                result = await resp.json()
+                
+                print(f"Uniswap subgraph response status: {resp.status}")
+                if resp.status != 200:
+                    print(f"Uniswap subgraph error: {result}")
+                    return {}
+                
+                if result is None:
+                    print("Uniswap subgraph returned None")
+                    return {}
+                
+                pools = result.get("data", {}).get("pools", [])
+                print(f"Found {len(pools)} Uniswap pools")
+                
+                # Try to get additional pools if we have less than 1000
+                if len(pools) < 1000:
+                    try:
+                        additional_query = {
+                            "query": """
+                            {
+                              pools(first: 1000, skip: 1000, orderBy: totalValueLockedUSD, orderDirection: desc) {
+                                id
+                                token0 { id symbol }
+                                token1 { id symbol }
+                                token0Price
+                                token1Price
+                                totalValueLockedUSD
+                                volumeUSD
+                                feeTier
+                              }
+                            }
+                            """
+                        }
+                        async with session.post(UNISWAP_V3_SUBGRAPH, json=additional_query) as additional_resp:
+                            additional_result = await additional_resp.json()
+                            additional_pools = additional_result.get("data", {}).get("pools", [])
+                            pools.extend(additional_pools)
+                            print(f"Added {len(additional_pools)} additional pools")
+                    except Exception as e:
+                        print(f"Could not get additional pools: {e}")
+                
+                prices = {}
+                processed_count = 0
+                for i, pool in enumerate(pools):
+                    if i % 1000 == 0:
+                        print(f"Processing Uniswap pool {i}/{len(pools)}...")
+                    
+                    try:
+                        tokens = pool["token0"], pool["token1"]
+                        price = float(pool.get('token0Price', 0))
+                        tvl = float(pool.get("totalValueLockedUSD", 0))
+                        volume = float(pool.get("volumeUSD", 0))
+                        fee_tier = int(pool.get("feeTier", 3000))  # Use raw value (e.g., 100, 500, 3000)
+                        
+                        # More aggressive filtering - look for liquid pools with recent activity
+                        if price > 0 and tvl > MIN_LIQUIDITY_USD and volume > 1000:  # Higher thresholds for better opportunities
+                            pair_key = f"{tokens[0]['symbol']}/{tokens[1]['symbol']}"
+                            prices[pair_key] = {
+                                'price': price,
+                                'tvl': tvl,
+                                'volume': volume,
+                                'fee_tier': fee_tier,
+                                'pool_id': pool['id'],
+                                'token0': tokens[0]['id'],
+                                'token1': tokens[1]['id']
+                            }
+                            processed_count += 1
+                    except Exception as e:
+                        continue
+                
+                print(f"Processed {processed_count} Uniswap pools with valid prices")
+                return prices
+                
+    except Exception as e:
+        print(f"Error fetching Uniswap prices: {e}")
+        return {}
 
 if __name__ == "__main__":
     asyncio.run(monitor())
