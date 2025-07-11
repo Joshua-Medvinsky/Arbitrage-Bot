@@ -81,7 +81,7 @@ UNISWAP_V3_ROUTER_ABI = [
 ]
 
 # SushiSwap router address and ABI
-SUSHISWAP_ROUTER = '0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F'
+SUSHISWAP_ROUTER = '0x6BDED42c6DA8FBf0d2bA55B2fa120C5e0c8D7891'
 SUSHISWAP_ROUTER_ABI = [
     {"inputs":[{"internalType":"address","name":"_factory","type":"address"},{"internalType":"address","name":"_WETH","type":"address"}],"stateMutability":"nonpayable","type":"constructor"},
     {"inputs":[],"name":"WETH","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},
@@ -1766,13 +1766,14 @@ def check_and_convert_eth_if_needed(executor, input_token_address, input_token_s
         print(f"   ❌ Error checking/converting token: {e}")
         return False
 
-def find_arbitrage_opportunities(uniswap_prices, aerodrome_prices, balancer_v2_prices, executor=None):
+def find_arbitrage_opportunities(uniswap_prices, aerodrome_prices, balancer_v2_prices, sushiswap_prices, executor=None):
     """Find arbitrage opportunities with enhanced analysis"""
     opportunities = []
     all_prices = {
         'Uniswap': uniswap_prices,
         'Aerodrome': aerodrome_prices,
-        'Balancer V2': balancer_v2_prices
+        'Balancer V2': balancer_v2_prices,
+        'SushiSwap': sushiswap_prices
     }
     all_pairs = set()
     for dex_prices in all_prices.values():
@@ -1942,11 +1943,13 @@ async def monitor_once(executor):
     uniswap_prices = await get_uniswap_prices()
     aerodrome_prices = await get_aerodrome_prices()
     balancer_v2_prices = await get_balancer_v2_prices()
+    sushiswap_prices = await get_sushiswap_prices()
     print(f"📊 Found {len(uniswap_prices)} Uniswap pools")
     print(f"📊 Found {len(aerodrome_prices)} Aerodrome pools")
     print(f"📊 Found {len(balancer_v2_prices)} Balancer V2 pools")
+    print(f"📊 Found {len(sushiswap_prices)} SushiSwap pools")
     print("🔍 Analyzing arbitrage opportunities...")
-    opportunities = find_arbitrage_opportunities(uniswap_prices, aerodrome_prices, balancer_v2_prices, executor=executor)
+    opportunities = find_arbitrage_opportunities(uniswap_prices, aerodrome_prices, balancer_v2_prices, sushiswap_prices, executor=executor)
     if not opportunities:
         print("❌ No executable arbitrage opportunities found")
         opportunities = []
@@ -2106,6 +2109,147 @@ async def get_uniswap_prices():
                 
     except Exception as e:
         print(f"Error fetching Uniswap prices: {e}")
+        return {}
+
+async def get_sushiswap_prices():
+    """Get all SushiSwap pool prices with enhanced monitoring"""
+    # SushiSwap factory address on Base (from official documentation)
+    SUSHISWAP_FACTORY = "0x71524B4f93c58fcbF659783284E38825f0622859"
+    
+    # SushiSwap router address on Base (from official documentation)
+    SUSHISWAP_ROUTER = "0x6BDED42c6DA8FBf0d2bA55B2fa120C5e0c8D7891"
+    
+    # SushiSwap Factory ABI (minimal for pair enumeration)
+    FACTORY_ABI = [
+        {"constant":True,"inputs":[{"internalType":"uint256","name":"","type":"uint256"}],"name":"allPairs","outputs":[{"internalType":"address","name":"","type":"address"}],"payable":False,"stateMutability":"view","type":"function"},
+        {"constant":True,"inputs":[],"name":"allPairsLength","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"payable":False,"stateMutability":"view","type":"function"},
+        {"constant":True,"inputs":[{"internalType":"address","name":"","type":"address"},{"internalType":"address","name":"","type":"address"}],"name":"getPair","outputs":[{"internalType":"address","name":"","type":"address"}],"payable":False,"stateMutability":"view","type":"function"}
+    ]
+    
+    # SushiSwap Pair ABI (minimal for price calculation)
+    PAIR_ABI = [
+        {"constant":True,"inputs":[],"name":"getReserves","outputs":[{"internalType":"uint112","name":"_reserve0","type":"uint112"},{"internalType":"uint112","name":"_reserve1","type":"uint112"},{"internalType":"uint32","name":"_blockTimestampLast","type":"uint32"}],"payable":False,"stateMutability":"view","type":"function"},
+        {"constant":True,"inputs":[],"name":"token0","outputs":[{"internalType":"address","name":"","type":"address"}],"payable":False,"stateMutability":"view","type":"function"},
+        {"constant":True,"inputs":[],"name":"token1","outputs":[{"internalType":"address","name":"","type":"address"}],"payable":False,"stateMutability":"view","type":"function"}
+    ]
+    
+    # ERC20 Token ABI for getting symbol and decimals
+    TOKEN_ABI = [
+        {"constant":True,"inputs":[],"name":"symbol","outputs":[{"internalType":"string","name":"","type":"string"}],"payable":False,"stateMutability":"view","type":"function"},
+        {"constant":True,"inputs":[],"name":"decimals","outputs":[{"internalType":"uint8","name":"","type":"uint8"}],"payable":False,"stateMutability":"view","type":"function"}
+    ]
+    
+    try:
+        print("🔍 Fetching SushiSwap V2 prices from Base network...")
+        
+        # Create factory contract
+        factory_contract = w3.eth.contract(address=Web3.to_checksum_address(SUSHISWAP_FACTORY), abi=FACTORY_ABI)
+        
+        # Get total number of pairs
+        pair_count = factory_contract.functions.allPairsLength().call()
+        print(f"   Found {pair_count} SushiSwap pairs on Base")
+        
+        if pair_count == 0:
+            print("   No SushiSwap pairs found on Base")
+            return {}
+        
+        # Limit to first 100 pairs for performance
+        pairs_to_check = min(pair_count, 100)
+        print(f"   Checking first {pairs_to_check} pairs...")
+        
+        prices = {}
+        processed_count = 0
+        
+        for i in range(pairs_to_check):
+            if i % 10 == 0:
+                print(f"   Processing pair {i}/{pairs_to_check}...")
+            
+            try:
+                # Get pair address
+                pair_address = factory_contract.functions.allPairs(i).call()
+                
+                # Create pair contract
+                pair_contract = w3.eth.contract(address=pair_address, abi=PAIR_ABI)
+                
+                # Get reserves
+                reserves = pair_contract.functions.getReserves().call()
+                reserve0, reserve1 = reserves[0], reserves[1]
+                
+                if reserve0 == 0 or reserve1 == 0:
+                    continue  # Skip pairs with no liquidity
+                
+                # Get token addresses
+                token0_address = pair_contract.functions.token0().call()
+                token1_address = pair_contract.functions.token1().call()
+                
+                # Get token symbols and decimals
+                try:
+                    token0_contract = w3.eth.contract(address=token0_address, abi=TOKEN_ABI)
+                    token1_contract = w3.eth.contract(address=token1_address, abi=TOKEN_ABI)
+                    
+                    token0_symbol = token0_contract.functions.symbol().call()
+                    token1_symbol = token1_contract.functions.symbol().call()
+                    token0_decimals = token0_contract.functions.decimals().call()
+                    token1_decimals = token1_contract.functions.decimals().call()
+                    
+                except Exception as e:
+                    # Skip pairs with inaccessible tokens
+                    continue
+                
+                # Calculate price (token0/token1) with proper decimal handling - consistent with Uniswap V3
+                reserve0_float = reserve0 / (10 ** token0_decimals)
+                reserve1_float = reserve1 / (10 ** token1_decimals)
+                
+                if reserve1_float == 0:
+                    continue
+                
+                # Price is token0/token1 (consistent with Uniswap V3 token0Price)
+                price = reserve0_float / reserve1_float
+                
+                # Filter for realistic prices and liquid pairs
+                if 0.0001 < price < 1000000 and reserve0_float > 0.001 and reserve1_float > 0.001:
+                    pair_key = f"{token0_symbol}/{token1_symbol}"
+                    
+                    # Estimate TVL (rough calculation)
+                    # For WETH pairs, use WETH price of ~$2500
+                    # For USDC pairs, use USDC price of ~$1
+                    tvl_estimate = 0
+                    if token0_symbol == 'WETH' or token1_symbol == 'WETH':
+                        weth_price_usd = 2500
+                        if token0_symbol == 'WETH':
+                            tvl_estimate = reserve0_float * weth_price_usd * 2
+                        else:
+                            tvl_estimate = reserve1_float * weth_price_usd * 2
+                    elif token0_symbol == 'USDC' or token1_symbol == 'USDC':
+                        usdc_price_usd = 1
+                        if token0_symbol == 'USDC':
+                            tvl_estimate = reserve0_float * usdc_price_usd * 2
+                        else:
+                            tvl_estimate = reserve1_float * usdc_price_usd * 2
+                    else:
+                        # Rough estimate for other tokens
+                        tvl_estimate = (reserve0_float + reserve1_float) * 1000
+                    
+                    prices[pair_key] = {
+                        'price': price,
+                        'tvl': tvl_estimate,
+                        'volume': 0,  # SushiSwap V2 doesn't provide volume in this query
+                        'pool_id': pair_address,
+                        'token0': token0_address,
+                        'token1': token1_address,
+                        'fee_tier': None  # SushiSwap V2 uses 0.3% fee
+                    }
+                    processed_count += 1
+                    
+            except Exception as e:
+                # Skip problematic pairs
+                continue
+        
+        print(f"   Processed {processed_count} SushiSwap pairs with valid prices")
+        return prices
+        
+    except Exception as e:
+        print(f"Error fetching SushiSwap prices: {e}")
         return {}
 
 if __name__ == "__main__":
