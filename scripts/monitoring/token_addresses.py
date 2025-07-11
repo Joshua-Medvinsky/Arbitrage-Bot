@@ -4,7 +4,7 @@ import os
 # Load the token list JSON (assumed to be in the same directory)
 TOKEN_LIST_PATH = os.path.join(os.path.dirname(__file__), 'token_list.json')
 
-with open(TOKEN_LIST_PATH, 'r') as f:
+with open(TOKEN_LIST_PATH, 'r', encoding='utf-8') as f:
     token_list = json.load(f)
 
 # Extract only Base tokens (chainId 8453)
