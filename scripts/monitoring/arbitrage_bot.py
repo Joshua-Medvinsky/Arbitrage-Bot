@@ -1409,10 +1409,10 @@ async def get_aerodrome_prices():
                         pair_key = f"{t0['symbol']}/{t1['symbol']}"
                         
                         price = 1.0
-                        if 'token1Price' in pair and pair['token1Price']:
+                        if 'token0Price' in pair and pair['token0Price']:
+                            price = float(pair['token0Price'])  # Use token0/token1 for consistency with Uniswap
+                        elif 'token1Price' in pair and pair['token1Price']:
                             price = float(pair['token1Price'])
-                        elif 'token0Price' in pair and pair['token0Price']:
-                            price = float(pair['token0Price'])
                         
                         tvl = float(pair.get("totalValueLockedUSD", 0))
                         volume = float(pair.get("volumeUSD", 0))
@@ -1541,6 +1541,16 @@ async def get_balancer_v2_prices():
                             if not pool_data:
                                 continue
                             
+                            # Debug: Print pool structure for first few pools
+                            if i < 3:
+                                print(f"[DEBUG] Pool {pool_id} structure:")
+                                print(f"   Pool type: {pool_data.get('poolType', 'N/A')}")
+                                print(f"   Pool version: {pool_data.get('poolTypeVersion', 'N/A')}")
+                                print(f"   Tokens: {pool_data.get('tokens', [])}")
+                                if pool_data.get('tokens'):
+                                    for j, token in enumerate(pool_data['tokens']):
+                                        print(f"   Token {j}: {token}")
+                            
                             tokens = pool_data.get("tokens", [])
                             if len(tokens) < 2:
                                 continue
@@ -1550,16 +1560,48 @@ async def get_balancer_v2_prices():
                             token1 = tokens[1]
                             
                             # Calculate price based on token balances and weights
-                            balance0 = float(token0.get("balance", 0))
-                            balance1 = float(token1.get("balance", 0))
-                            weight0 = float(token0.get("weight", 0))
-                            weight1 = float(token1.get("weight", 0))
+                            balance0 = token0.get("balance")
+                            balance1 = token1.get("balance")
+                            weight0 = token0.get("weight")
+                            weight1 = token1.get("weight")
+                            
+                            # Check for null values before converting to float
+                            if balance0 is None or balance1 is None:
+                                print(f"   Skipping pool {pool_id}: null balance values")
+                                continue
+                            
+                            # Convert to float after null checks
+                            balance0 = float(balance0)
+                            balance1 = float(balance1)
                             
                             if balance0 == 0 or balance1 == 0:
                                 continue
                             
-                            # Calculate price (token1/token0)
-                            price = balance1 / balance0
+                            # Calculate price based on pool type
+                            if weight0 is None or weight1 is None:
+                                # For pools without weights (Gyro, Stable, etc.), use balance-based pricing
+                                print(f"   Pool {pool_id}: Using balance-based pricing (no weights)")
+                                # Account for token decimals
+                                decimals0 = int(token0.get("decimals", 18))
+                                decimals1 = int(token1.get("decimals", 18))
+                                # Convert balances to proper decimal representation
+                                balance0_float = balance0 / (10 ** decimals0)
+                                balance1_float = balance1 / (10 ** decimals1)
+                                # Calculate price as token1/token0 (consistent with other DEXes)
+                                price = balance1_float / balance0_float if balance0_float > 0 else 0
+                            else:
+                                # For weighted pools, use weight-based pricing
+                                weight0 = float(weight0)
+                                weight1 = float(weight1)
+                                print(f"   Pool {pool_id}: Using weight-based pricing")
+                                # Account for token decimals
+                                decimals0 = int(token0.get("decimals", 18))
+                                decimals1 = int(token1.get("decimals", 18))
+                                # Convert balances to proper decimal representation
+                                balance0_float = balance0 / (10 ** decimals0)
+                                balance1_float = balance1 / (10 ** decimals1)
+                                # Weight-based price calculation (token1/token0)
+                                price = (balance1_float / weight1) / (balance0_float / weight0) if balance0_float > 0 and weight0 > 0 else 0
                             
                             # Get total liquidity
                             total_liquidity = float(pool_data.get("totalLiquidity", 0))
@@ -1833,33 +1875,56 @@ def estimate_flash_loan_profit(buy_price, sell_price, pair_info, eth_amount=10.0
 
 def estimate_profit(buy_price, sell_price, eth_amount=None, eth_price_usd=2500, gas_cost_usd=None):
     """
-    Estimate realistic arbitrage profit accounting for all costs, with correct unit conversions.
-    buy_price and sell_price are in terms of output_token per input_token (e.g., WETH per bsdETH).
+    Estimate realistic arbitrage profit accounting for all costs.
+    buy_price and sell_price are in terms of token1/token0 (e.g., USDC/WETH).
     All profit/costs are in USD.
     """
     if eth_amount is None:
-        eth_amount = POSITION_SIZE_USD
-    if buy_price < 10:
-        amount_in = POSITION_SIZE_USD / eth_price_usd
-        amount_in_usd = amount_in * eth_price_usd
-        print(f"[DEBUG] estimate_profit: buy_price={buy_price}, sell_price={sell_price}, amount_in={amount_in} WETH, amount_in_usd={amount_in_usd}")
-    else:
-        amount_in = POSITION_SIZE_USD / 1
-        amount_in_usd = amount_in
-        print(f"[DEBUG] estimate_profit: buy_price={buy_price}, sell_price={sell_price}, amount_in={amount_in} USDC, amount_in_usd={amount_in_usd}")
-    gross_profit_usd = (sell_price - buy_price) * amount_in
-    print(f"[DEBUG] gross_profit_usd: {gross_profit_usd}")
+        eth_amount = POSITION_SIZE_USD / eth_price_usd  # Convert USD to ETH amount
+    
+    # Calculate actual token amounts for arbitrage
+    # Step 1: Buy token1 with token0 (e.g., buy USDC with WETH)
+    amount_token0_in = eth_amount  # e.g., 0.004 WETH
+    amount_token1_out = amount_token0_in * buy_price  # e.g., 0.004 * 2532.5 = 10.13 USDC
+    
+    # Step 2: Sell token1 for token0 (e.g., sell USDC for WETH)
+    amount_token1_in = amount_token1_out  # Use all the token1 we got from step 1
+    amount_token0_out = amount_token1_in / sell_price  # e.g., 10.13 / 2532.5 = 0.004 WETH
+    
+    # Calculate gross profit in token0 terms
+    gross_profit_token0 = amount_token0_out - amount_token0_in
+    gross_profit_usd = gross_profit_token0 * eth_price_usd
+    
+    print(f"[DEBUG] estimate_profit breakdown:")
+    print(f"   Initial amount: {amount_token0_in:.6f} WETH (${amount_token0_in * eth_price_usd:.2f})")
+    print(f"   Buy price: {buy_price:.6f} USDC/WETH")
+    print(f"   Token1 received: {amount_token1_out:.6f} USDC")
+    print(f"   Sell price: {sell_price:.6f} USDC/WETH")
+    print(f"   Token0 received back: {amount_token0_out:.6f} WETH")
+    print(f"   Gross profit: {gross_profit_token0:.6f} WETH (${gross_profit_usd:.2f})")
+    
+    # Calculate costs
     if gas_cost_usd is None:
         gas_price_eth = BASE_GAS_PRICE_GWEI / 1e9
         total_gas_eth = (GAS_LIMIT_SWAP * 2 + GAS_LIMIT_APPROVE * 2) * gas_price_eth
         gas_cost_usd = total_gas_eth * eth_price_usd
+    
     transaction_fees_usd = POSITION_SIZE_USD * TRANSACTION_FEE_PCT * 2
     slippage_cost_usd = POSITION_SIZE_USD * SLIPPAGE_PCT * 2
     mev_protection_cost_usd = MEV_PROTECTION_COST_USD
     total_costs_usd = gas_cost_usd + transaction_fees_usd + slippage_cost_usd + mev_protection_cost_usd
+    
     net_profit_usd = gross_profit_usd - total_costs_usd
     net_profit_pct = (net_profit_usd / POSITION_SIZE_USD) * 100 if POSITION_SIZE_USD else 0
-    print(f"[DEBUG] net_profit_usd: {net_profit_usd}, total_costs_usd: {total_costs_usd}, net_profit_pct: {net_profit_pct:.2f}%")
+    
+    print(f"[DEBUG] Costs breakdown:")
+    print(f"   Gas cost: ${gas_cost_usd:.2f}")
+    print(f"   Transaction fees: ${transaction_fees_usd:.2f}")
+    print(f"   Slippage: ${slippage_cost_usd:.2f}")
+    print(f"   MEV protection: ${mev_protection_cost_usd:.2f}")
+    print(f"   Total costs: ${total_costs_usd:.2f}")
+    print(f"   Net profit: ${net_profit_usd:.2f} ({net_profit_pct:.2f}%)")
+    
     return {
         'gross_profit_usd': gross_profit_usd,
         'gas_cost_usd': gas_cost_usd,
