@@ -7,7 +7,52 @@
     <title>Arbitrage Bot Dashboard</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Immediate loading screen to prevent white flash -->
+      <div id="initial-loader" style="
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(135deg, #0D1421 0%, #1A1F2E 50%, #2D3748 100%);
+        color: #ffffff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+        z-index: 9999;
+      ">
+        <div style="text-align: center;">
+          <div style="
+            width: 60px;
+            height: 60px;
+            margin: 0 auto 1rem auto;
+            border: 3px solid #374151;
+            border-top: 3px solid #3B82F6;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+          "></div>
+          <h2 style="
+            margin: 0;
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #F3F4F6;
+          ">Loading Arbitrage Bot</h2>
+          <p style="
+            margin: 0.5rem 0 0 0;
+            color: #9CA3AF;
+            font-size: 0.9rem;
+          ">Initializing application...</p>
+        </div>
+      </div>
+      <style>
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      </style>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

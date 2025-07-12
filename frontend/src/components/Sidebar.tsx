@@ -1,3 +1,5 @@
+import { Home, Settings, Info, TrendingUp, Activity, Shield } from 'lucide-react'
+
 export type TabType = 'home' | 'settings' | 'info'
 
 interface SidebarProps {
@@ -9,106 +11,314 @@ const Sidebar = ({ activeTab, onTabChange }: SidebarProps) => {
   const tabs = [
     {
       id: 'home' as TabType,
-      name: 'Home',
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-        </svg>
-      ),
-      description: 'Dashboard & Trading'
+      name: 'Dashboard',
+      icon: <Home size={20} />,
+      description: 'Trading & Analytics',
+      color: '#00D4AA'
     },
     {
       id: 'settings' as TabType,
       name: 'Settings',
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-        </svg>
-      ),
-      description: 'Configuration & Preferences'
+      icon: <Settings size={20} />,
+      description: 'Configuration',
+      color: '#4F46E5'
     },
     {
       id: 'info' as TabType,
       name: 'Info',
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-      ),
-      description: 'Help & Documentation'
+      icon: <Info size={20} />,
+      description: 'Help & Docs',
+      color: '#F59E0B'
     }
   ]
 
+  const cardStyle = {
+    backgroundColor: '#1A1F2E',
+    border: '1px solid #2D3748',
+    borderRadius: '12px',
+    padding: '16px',
+    marginBottom: '8px',
+    transition: 'all 0.2s ease'
+  }
+
   return (
-    <div className="h-screen flex flex-col flex-shrink-0" style={{ 
-      backgroundColor: '#1a1f2e',
+    <div style={{ 
       width: '20%',
-      minWidth: '250px'
+      minWidth: '280px',
+      height: '100vh',
+      backgroundColor: '#0D1421',
+      borderRight: '1px solid #2D3748',
+      display: 'flex',
+      flexDirection: 'column'
     }}>
       {/* Header */}
-      <div className="p-6 border-b flex-shrink-0" style={{ backgroundColor: '#161922', borderBottomColor: '#374151' }}>
-        <h1 className="text-xl font-bold text-white mb-1">
-          Arbitrage Bot
-        </h1>
-        <p className="text-xs text-gray-400">
-          v1.0.0
-        </p>
+      <div style={{ 
+        padding: '32px 24px 24px',
+        borderBottom: '1px solid #2D3748'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+          <div style={{ 
+            backgroundColor: '#00D4AA20', 
+            borderRadius: '12px', 
+            padding: '12px',
+            color: '#00D4AA'
+          }}>
+            <TrendingUp size={24} />
+          </div>
+          <div>
+            <h1 style={{ 
+              fontSize: '24px', 
+              fontWeight: '700', 
+              margin: 0, 
+              color: '#ffffff',
+              letterSpacing: '-0.5px'
+            }}>
+              ArbiBot
+            </h1>
+            <p style={{ 
+              fontSize: '14px', 
+              margin: 0, 
+              color: '#9CA3AF',
+              fontWeight: '500'
+            }}>
+              Pro Trading Suite
+            </p>
+          </div>
+        </div>
+        
+        {/* Status Indicator */}
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: '8px',
+          padding: '8px 12px',
+          backgroundColor: '#00D4AA20',
+          borderRadius: '8px',
+          border: '1px solid #00D4AA30'
+        }}>
+          <div style={{ 
+            width: '8px', 
+            height: '8px', 
+            borderRadius: '50%', 
+            backgroundColor: '#00D4AA',
+            animation: 'pulse 2s infinite'
+          }} />
+          <span style={{ fontSize: '12px', color: '#00D4AA', fontWeight: '600' }}>
+            SYSTEM ONLINE
+          </span>
+        </div>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 p-4" style={{ backgroundColor: '#1a1f2e' }}>
-        <div className="space-y-2">
-          {tabs.map((tab) => (
-            <div key={tab.id}>
+      <nav style={{ 
+        flex: 1, 
+        padding: '24px',
+        overflowY: 'auto'
+      }}>
+        <h3 style={{ 
+          fontSize: '12px', 
+          fontWeight: '600', 
+          color: '#9CA3AF', 
+          margin: '0 0 16px 0',
+          textTransform: 'uppercase',
+          letterSpacing: '0.5px'
+        }}>
+          Navigation
+        </h3>
+        
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {tabs.map((tab) => {
+            const isActive = activeTab === tab.id
+            
+            return (
               <button
+                key={tab.id}
                 onClick={() => onTabChange(tab.id)}
-                className={`w-full flex items-start space-x-3 px-4 py-3 rounded-lg text-left transition-all duration-200 group ${
-                  activeTab === tab.id
-                    ? 'bg-crypto-blue text-white shadow-lg'
-                    : 'text-gray-300 hover:text-white'
-                }`}
-                style={activeTab !== tab.id ? { 
-                  backgroundColor: 'transparent',
-                  transition: 'background-color 0.2s'
-                } : {}}
+                style={{
+                  ...cardStyle,
+                  backgroundColor: isActive ? '#1A1F2E' : 'transparent',
+                  borderColor: isActive ? tab.color : '#2D3748',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  position: 'relative',
+                  overflow: 'hidden'
+                }}
                 onMouseEnter={(e) => {
-                  if (activeTab !== tab.id) {
-                    e.currentTarget.style.backgroundColor = '#374151'
+                  if (!isActive) {
+                    e.currentTarget.style.backgroundColor = '#1A1F2E'
+                    e.currentTarget.style.borderColor = '#374151'
+                    e.currentTarget.style.transform = 'translateX(4px)'
                   }
                 }}
                 onMouseLeave={(e) => {
-                  if (activeTab !== tab.id) {
+                  if (!isActive) {
                     e.currentTarget.style.backgroundColor = 'transparent'
+                    e.currentTarget.style.borderColor = '#2D3748'
+                    e.currentTarget.style.transform = 'translateX(0)'
                   }
                 }}
               >
-                <div className={`mt-0.5 ${
-                  activeTab === tab.id ? 'text-white' : 'text-gray-400 group-hover:text-gray-300'
-                }`}>
-                  {tab.icon}
-                </div>
-                <div className="flex-1">
-                  <div className="font-medium">
-                    {tab.name}
+                {/* Active indicator */}
+                {isActive && (
+                  <div style={{
+                    position: 'absolute',
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: '4px',
+                    backgroundColor: tab.color,
+                    borderRadius: '0 4px 4px 0'
+                  }} />
+                )}
+                
+                <div style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '16px',
+                  paddingLeft: isActive ? '12px' : '8px'
+                }}>
+                  <div style={{ 
+                    color: isActive ? tab.color : '#9CA3AF',
+                    transition: 'color 0.2s ease'
+                  }}>
+                    {tab.icon}
                   </div>
-                  <div className={`text-xs ${
-                    activeTab === tab.id ? 'text-gray-200' : 'text-gray-500 group-hover:text-gray-400'
-                  }`}>
-                    {tab.description}
+                  
+                  <div style={{ flex: 1 }}>
+                    <div style={{ 
+                      fontSize: '16px', 
+                      fontWeight: '600', 
+                      color: isActive ? '#ffffff' : '#E5E7EB',
+                      marginBottom: '2px'
+                    }}>
+                      {tab.name}
+                    </div>
+                    <div style={{ 
+                      fontSize: '12px', 
+                      color: isActive ? '#9CA3AF' : '#6B7280'
+                    }}>
+                      {tab.description}
+                    </div>
                   </div>
+                  
+                  {isActive && (
+                    <div style={{
+                      width: '6px',
+                      height: '6px',
+                      borderRadius: '50%',
+                      backgroundColor: tab.color
+                    }} />
+                  )}
                 </div>
               </button>
+            )
+          })}
+        </div>
+
+        {/* Quick Stats */}
+        <div style={{ marginTop: '32px' }}>
+          <h3 style={{ 
+            fontSize: '12px', 
+            fontWeight: '600', 
+            color: '#9CA3AF', 
+            margin: '0 0 16px 0',
+            textTransform: 'uppercase',
+            letterSpacing: '0.5px'
+          }}>
+            Quick Stats
+          </h3>
+          
+          <div style={cardStyle}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+              <div style={{ 
+                backgroundColor: '#10B98120', 
+                borderRadius: '8px', 
+                padding: '8px',
+                color: '#10B981'
+              }}>
+                <Activity size={16} />
+              </div>
+              <div>
+                <p style={{ margin: 0, fontSize: '14px', fontWeight: '600', color: '#ffffff' }}>
+                  Active Trades
+                </p>
+                <p style={{ margin: 0, fontSize: '12px', color: '#9CA3AF' }}>
+                  Real-time monitoring
+                </p>
+              </div>
             </div>
-          ))}
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '24px', fontWeight: '700', color: '#ffffff' }}>
+                23
+              </span>
+              <span style={{ fontSize: '12px', color: '#10B981', fontWeight: '600' }}>
+                +12%
+              </span>
+            </div>
+          </div>
+
+          <div style={cardStyle}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+              <div style={{ 
+                backgroundColor: '#F59E0B20', 
+                borderRadius: '8px', 
+                padding: '8px',
+                color: '#F59E0B'
+              }}>
+                <Shield size={16} />
+              </div>
+              <div>
+                <p style={{ margin: 0, fontSize: '14px', fontWeight: '600', color: '#ffffff' }}>
+                  Risk Level
+                </p>
+                <p style={{ margin: 0, fontSize: '12px', color: '#9CA3AF' }}>
+                  Current exposure
+                </p>
+              </div>
+            </div>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '16px', fontWeight: '600', color: '#F59E0B' }}>
+                LOW
+              </span>
+              <div style={{ 
+                width: '40px', 
+                height: '6px', 
+                backgroundColor: '#2D3748', 
+                borderRadius: '3px',
+                overflow: 'hidden'
+              }}>
+                <div style={{ 
+                  width: '30%', 
+                  height: '100%', 
+                  backgroundColor: '#F59E0B',
+                  borderRadius: '3px'
+                }} />
+              </div>
+            </div>
+          </div>
         </div>
       </nav>
 
       {/* Footer */}
-      <div className="p-4 border-t flex-shrink-0" style={{ backgroundColor: '#161922', borderTopColor: '#374151' }}>
-        <div className="text-xs text-gray-500 text-center">
-          <div className="mb-1">Built with React + Tauri</div>
-          <div>© 2025 Arbitrage Bot</div>
+      <div style={{ 
+        padding: '24px',
+        borderTop: '1px solid #2D3748'
+      }}>
+        <div style={{ 
+          textAlign: 'center',
+          fontSize: '12px',
+          color: '#6B7280'
+        }}>
+          <div style={{ marginBottom: '8px', fontWeight: '600' }}>
+            Built with React + Tauri
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '4px' }}>
+            <span>©</span>
+            <span>2025</span>
+            <span style={{ color: '#00D4AA', fontWeight: '600' }}>ArbiBot</span>
+          </div>
         </div>
       </div>
     </div>

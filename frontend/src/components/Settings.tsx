@@ -1,4 +1,18 @@
 import { useState, useEffect } from 'react'
+import { 
+  Save, 
+  RotateCcw, 
+  Shield, 
+  Zap, 
+  DollarSign, 
+  Settings as SettingsIcon,
+  TrendingUp,
+  AlertTriangle,
+  Activity,
+  Target,
+  Gauge,
+  Lock
+} from 'lucide-react'
 
 interface SettingsData {
   SIMULATION_MODE: boolean
@@ -39,6 +53,21 @@ const Settings = ({ socket }: SettingsProps) => {
 
   const [hasChanges, setHasChanges] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+
+  const cardStyle = {
+    backgroundColor: '#1A1F2E',
+    border: '1px solid #2D3748',
+    borderRadius: '16px',
+    padding: '24px',
+    marginBottom: '24px'
+  }
+
+  const smallCardStyle = {
+    backgroundColor: '#0D1421',
+    border: '1px solid #2D3748',
+    borderRadius: '12px',
+    padding: '20px'
+  }
 
   useEffect(() => {
     // Request current settings from server
@@ -93,36 +122,83 @@ const Settings = ({ socket }: SettingsProps) => {
     checked, 
     onChange, 
     label, 
-    description 
+    description,
+    icon,
+    color = '#00D4AA'
   }: {
     id: string
     checked: boolean
     onChange: (value: boolean) => void
     label: string
     description?: string
+    icon?: React.ReactNode
+    color?: string
   }) => (
-    <div className="flex items-start justify-between p-4 bg-crypto-dark rounded-lg">
-      <div className="flex-1">
-        <label htmlFor={id} className="font-medium text-white cursor-pointer">
-          {label}
-        </label>
-        {description && (
-          <p className="text-sm text-gray-400 mt-1">{description}</p>
-        )}
+    <div style={smallCardStyle}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flex: 1 }}>
+          {icon && (
+            <div style={{ 
+              backgroundColor: `${color}20`, 
+              borderRadius: '12px', 
+              padding: '12px',
+              color: color
+            }}>
+              {icon}
+            </div>
+          )}
+          <div style={{ flex: 1 }}>
+            <label htmlFor={id} style={{ 
+              fontSize: '16px', 
+              fontWeight: '600', 
+              color: '#ffffff', 
+              cursor: 'pointer',
+              margin: 0,
+              display: 'block'
+            }}>
+              {label}
+            </label>
+            {description && (
+              <p style={{ 
+                fontSize: '14px', 
+                color: '#9CA3AF', 
+                margin: '4px 0 0 0'
+              }}>
+                {description}
+              </p>
+            )}
+          </div>
+        </div>
+        
+        <button
+          type="button"
+          onClick={() => onChange(!checked)}
+          style={{
+            position: 'relative',
+            display: 'inline-flex',
+            height: '24px',
+            width: '44px',
+            alignItems: 'center',
+            borderRadius: '12px',
+            backgroundColor: checked ? color : '#6B7280',
+            border: 'none',
+            cursor: 'pointer',
+            transition: 'background-color 0.2s ease'
+          }}
+        >
+          <span
+            style={{
+              display: 'inline-block',
+              height: '16px',
+              width: '16px',
+              borderRadius: '8px',
+              backgroundColor: '#ffffff',
+              transform: checked ? 'translateX(24px)' : 'translateX(4px)',
+              transition: 'transform 0.2s ease'
+            }}
+          />
+        </button>
       </div>
-      <button
-        type="button"
-        onClick={() => onChange(!checked)}
-        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-crypto-blue focus:ring-offset-2 focus:ring-offset-gray-800 ${
-          checked ? 'bg-crypto-green' : 'bg-gray-600'
-        }`}
-      >
-        <span
-          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-            checked ? 'translate-x-6' : 'translate-x-1'
-          }`}
-        />
-      </button>
     </div>
   )
 
@@ -135,7 +211,9 @@ const Settings = ({ socket }: SettingsProps) => {
     min, 
     max, 
     step = 1,
-    unit = ''
+    unit = '',
+    icon,
+    color = '#4F46E5'
   }: {
     id: string
     value: number
@@ -146,15 +224,44 @@ const Settings = ({ socket }: SettingsProps) => {
     max?: number
     step?: number
     unit?: string
+    icon?: React.ReactNode
+    color?: string
   }) => (
-    <div className="p-4 bg-crypto-dark rounded-lg">
-      <label htmlFor={id} className="block font-medium text-white mb-1">
-        {label}
-      </label>
-      {description && (
-        <p className="text-sm text-gray-400 mb-3">{description}</p>
-      )}
-      <div className="flex items-center space-x-2">
+    <div style={smallCardStyle}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px', marginBottom: '16px' }}>
+        {icon && (
+          <div style={{ 
+            backgroundColor: `${color}20`, 
+            borderRadius: '12px', 
+            padding: '12px',
+            color: color
+          }}>
+            {icon}
+          </div>
+        )}
+        <div style={{ flex: 1 }}>
+          <label htmlFor={id} style={{ 
+            fontSize: '16px', 
+            fontWeight: '600', 
+            color: '#ffffff', 
+            margin: '0 0 4px 0',
+            display: 'block'
+          }}>
+            {label}
+          </label>
+          {description && (
+            <p style={{ 
+              fontSize: '14px', 
+              color: '#9CA3AF', 
+              margin: 0
+            }}>
+              {description}
+            </p>
+          )}
+        </div>
+      </div>
+      
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
         <input
           type="number"
           id={id}
@@ -163,64 +270,153 @@ const Settings = ({ socket }: SettingsProps) => {
           min={min}
           max={max}
           step={step}
-          className="flex-1 bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-crypto-blue focus:border-transparent"
+          style={{
+            flex: 1,
+            backgroundColor: '#2D3748',
+            border: '1px solid #4A5568',
+            borderRadius: '8px',
+            padding: '12px 16px',
+            color: '#ffffff',
+            fontSize: '14px',
+            outline: 'none'
+          }}
+          onFocus={(e) => {
+            e.target.style.borderColor = color
+            e.target.style.boxShadow = `0 0 0 3px ${color}20`
+          }}
+          onBlur={(e) => {
+            e.target.style.borderColor = '#4A5568'
+            e.target.style.boxShadow = 'none'
+          }}
         />
         {unit && (
-          <span className="text-gray-400 text-sm">{unit}</span>
+          <span style={{ 
+            fontSize: '14px', 
+            color: '#9CA3AF', 
+            fontWeight: '600',
+            minWidth: 'fit-content'
+          }}>
+            {unit}
+          </span>
         )}
       </div>
     </div>
   )
 
   return (
-    <div className="space-y-6">
+    <div style={{ padding: '0 8px' }}>
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-white">Settings</h2>
-          <p className="text-gray-400 mt-1">Configure your arbitrage bot parameters</p>
-        </div>
-        <div className="flex space-x-3">
-          {hasChanges && (
-            <button
-              onClick={handleResetSettings}
-              className="px-4 py-2 text-gray-400 hover:text-white transition-colors"
-            >
-              Reset
-            </button>
-          )}
+      <div style={{ marginBottom: '32px' }}>
+        <h1 style={{ fontSize: '32px', fontWeight: '700', margin: '0 0 8px 0', color: '#ffffff' }}>
+          Bot Configuration
+        </h1>
+        <p style={{ color: '#9CA3AF', fontSize: '16px', margin: 0 }}>
+          Fine-tune your arbitrage trading parameters and safety settings
+        </p>
+      </div>
+
+      {/* Action Buttons */}
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'flex-end', 
+        gap: '12px', 
+        marginBottom: '32px' 
+      }}>
+        {hasChanges && (
           <button
-            onClick={handleSaveSettings}
-            disabled={!hasChanges || isSaving}
-            className={`px-6 py-2 rounded-lg font-medium transition-all ${
-              hasChanges && !isSaving
-                ? 'bg-crypto-green text-white hover:bg-green-600'
-                : 'bg-gray-600 text-gray-400 cursor-not-allowed'
-            }`}
+            onClick={handleResetSettings}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '12px 20px',
+              backgroundColor: 'transparent',
+              border: '1px solid #6B7280',
+              borderRadius: '8px',
+              color: '#9CA3AF',
+              fontSize: '14px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = '#9CA3AF'
+              e.currentTarget.style.color = '#ffffff'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = '#6B7280'
+              e.currentTarget.style.color = '#9CA3AF'
+            }}
           >
-            {isSaving ? 'Saving...' : 'Save Changes'}
+            <RotateCcw size={16} />
+            Reset Changes
           </button>
-        </div>
+        )}
+        
+        <button
+          onClick={handleSaveSettings}
+          disabled={!hasChanges || isSaving}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '12px 24px',
+            backgroundColor: hasChanges && !isSaving ? '#00D4AA' : '#6B7280',
+            border: 'none',
+            borderRadius: '8px',
+            color: '#ffffff',
+            fontSize: '14px',
+            fontWeight: '600',
+            cursor: hasChanges && !isSaving ? 'pointer' : 'not-allowed',
+            opacity: hasChanges && !isSaving ? 1 : 0.5,
+            transition: 'all 0.2s ease'
+          }}
+        >
+          <Save size={16} />
+          {isSaving ? 'Saving...' : 'Save Changes'}
+        </button>
       </div>
 
       {/* Execution Settings */}
-      <div className="bg-crypto-gray p-6 rounded-lg">
-        <h3 className="text-lg font-semibold text-white mb-4">Execution Settings</h3>
-        <div className="space-y-4">
+      <div style={cardStyle}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' }}>
+          <div style={{ 
+            backgroundColor: '#00D4AA20', 
+            borderRadius: '12px', 
+            padding: '12px',
+            color: '#00D4AA'
+          }}>
+            <SettingsIcon size={24} />
+          </div>
+          <div>
+            <h3 style={{ fontSize: '20px', fontWeight: '600', margin: 0, color: '#ffffff' }}>
+              Execution Settings
+            </h3>
+            <p style={{ fontSize: '14px', color: '#9CA3AF', margin: 0 }}>
+              Core trading behavior and safety controls
+            </p>
+          </div>
+        </div>
+        
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '16px' }}>
           <ToggleSwitch
             id="simulation_mode"
             checked={settings.SIMULATION_MODE}
             onChange={(value) => handleInputChange('SIMULATION_MODE', value)}
             label="Simulation Mode"
-            description="When enabled, no real transactions will be executed"
+            description="Safe testing without real transactions"
+            icon={<Shield size={20} />}
+            color="#4F46E5"
           />
           
           <ToggleSwitch
             id="execution_mode"
             checked={settings.EXECUTION_MODE}
             onChange={(value) => handleInputChange('EXECUTION_MODE', value)}
-            label="Execution Mode"
-            description="Enable real transaction execution (requires Simulation Mode to be OFF)"
+            label="Live Trading"
+            description="Execute real transactions (disable simulation first)"
+            icon={<Zap size={20} />}
+            color="#F59E0B"
           />
           
           <ToggleSwitch
@@ -228,33 +424,57 @@ const Settings = ({ socket }: SettingsProps) => {
             checked={settings.SAFE_MODE}
             onChange={(value) => handleInputChange('SAFE_MODE', value)}
             label="Safe Mode"
-            description="Restricts trading to small amounts and safe tokens"
+            description="Restrict to small amounts and major tokens"
+            icon={<Lock size={20} />}
+            color="#10B981"
           />
           
           <ToggleSwitch
             id="flash_loan_enabled"
             checked={settings.FLASH_LOAN_ENABLED}
             onChange={(value) => handleInputChange('FLASH_LOAN_ENABLED', value)}
-            label="Flash Loan Enabled"
-            description="Enable flash loan arbitrage for larger capital efficiency"
+            label="Flash Loans"
+            description="Enable capital-efficient arbitrage"
+            icon={<Activity size={20} />}
+            color="#8B5CF6"
           />
         </div>
       </div>
 
-      {/* Profit Settings */}
-      <div className="bg-crypto-gray p-6 rounded-lg">
-        <h3 className="text-lg font-semibold text-white mb-4">Profit & Risk Settings</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Profit & Risk Settings */}
+      <div style={cardStyle}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' }}>
+          <div style={{ 
+            backgroundColor: '#00D4AA20', 
+            borderRadius: '12px', 
+            padding: '12px',
+            color: '#00D4AA'
+          }}>
+            <TrendingUp size={24} />
+          </div>
+          <div>
+            <h3 style={{ fontSize: '20px', fontWeight: '600', margin: 0, color: '#ffffff' }}>
+              Profit & Risk Management
+            </h3>
+            <p style={{ fontSize: '14px', color: '#9CA3AF', margin: 0 }}>
+              Define profit thresholds and position sizing
+            </p>
+          </div>
+        </div>
+        
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
           <NumberInput
             id="min_profit_pct"
             value={settings.MIN_PROFIT_PCT}
             onChange={(value) => handleInputChange('MIN_PROFIT_PCT', value)}
             label="Minimum Profit"
-            description="Minimum profit percentage to consider an opportunity"
+            description="Ignore opportunities below this threshold"
             min={0.1}
             max={50}
             step={0.1}
             unit="%"
+            icon={<Target size={20} />}
+            color="#00D4AA"
           />
           
           <NumberInput
@@ -262,11 +482,13 @@ const Settings = ({ socket }: SettingsProps) => {
             value={settings.MAX_PROFIT_PCT}
             onChange={(value) => handleInputChange('MAX_PROFIT_PCT', value)}
             label="Maximum Profit"
-            description="Maximum profit percentage (higher values may be unrealistic)"
+            description="Flag unrealistic opportunities above this"
             min={1}
             max={500}
             step={1}
             unit="%"
+            icon={<AlertTriangle size={20} />}
+            color="#F59E0B"
           />
           
           <NumberInput
@@ -274,11 +496,13 @@ const Settings = ({ socket }: SettingsProps) => {
             value={settings.POSITION_SIZE_USD}
             onChange={(value) => handleInputChange('POSITION_SIZE_USD', value)}
             label="Position Size"
-            description="USD amount to trade per opportunity"
+            description="USD amount per arbitrage trade"
             min={1}
             max={10000}
             step={1}
             unit="USD"
+            icon={<DollarSign size={20} />}
+            color="#10B981"
           />
           
           <NumberInput
@@ -286,53 +510,79 @@ const Settings = ({ socket }: SettingsProps) => {
             value={settings.MIN_LIQUIDITY_USD}
             onChange={(value) => handleInputChange('MIN_LIQUIDITY_USD', value)}
             label="Minimum Liquidity"
-            description="Minimum pool liquidity required for safe trading"
+            description="Required pool depth for safe trading"
             min={1000}
             max={10000000}
             step={1000}
             unit="USD"
+            icon={<Gauge size={20} />}
+            color="#6366F1"
           />
         </div>
       </div>
 
-      {/* Trading Settings */}
-      <div className="bg-crypto-gray p-6 rounded-lg">
-        <h3 className="text-lg font-semibold text-white mb-4">Trading Parameters</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Trading Parameters */}
+      <div style={cardStyle}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' }}>
+          <div style={{ 
+            backgroundColor: '#4F46E520', 
+            borderRadius: '12px', 
+            padding: '12px',
+            color: '#4F46E5'
+          }}>
+            <Activity size={24} />
+          </div>
+          <div>
+            <h3 style={{ fontSize: '20px', fontWeight: '600', margin: 0, color: '#ffffff' }}>
+              Trading Parameters
+            </h3>
+            <p style={{ fontSize: '14px', color: '#9CA3AF', margin: 0 }}>
+              Fine-tune execution behavior and costs
+            </p>
+          </div>
+        </div>
+        
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
           <NumberInput
             id="max_slippage"
             value={settings.MAX_SLIPPAGE * 100}
             onChange={(value) => handleInputChange('MAX_SLIPPAGE', value / 100)}
             label="Maximum Slippage"
-            description="Maximum allowed slippage for trades"
+            description="Price movement tolerance during execution"
             min={0.1}
             max={10}
             step={0.1}
             unit="%"
+            icon={<Gauge size={20} />}
+            color="#F59E0B"
           />
           
           <NumberInput
             id="mev_protection_cost"
             value={settings.MEV_PROTECTION_COST_USD}
             onChange={(value) => handleInputChange('MEV_PROTECTION_COST_USD', value)}
-            label="MEV Protection Cost"
-            description="Estimated cost of MEV protection per trade"
+            label="MEV Protection"
+            description="Estimated MEV protection cost per trade"
             min={0.1}
             max={50}
             step={0.1}
             unit="USD"
+            icon={<Shield size={20} />}
+            color="#8B5CF6"
           />
           
           <NumberInput
             id="min_profit_threshold"
             value={settings.MIN_PROFIT_THRESHOLD_USD}
             onChange={(value) => handleInputChange('MIN_PROFIT_THRESHOLD_USD', value)}
-            label="Minimum Profit Threshold"
-            description="Minimum USD profit required to execute trade"
+            label="Profit Threshold"
+            description="Minimum USD profit to execute trade"
             min={0.01}
             max={100}
             step={0.01}
             unit="USD"
+            icon={<DollarSign size={20} />}
+            color="#10B981"
           />
           
           <NumberInput
@@ -340,44 +590,80 @@ const Settings = ({ socket }: SettingsProps) => {
             value={settings.BASE_GAS_PRICE_GWEI}
             onChange={(value) => handleInputChange('BASE_GAS_PRICE_GWEI', value)}
             label="Base Gas Price"
-            description="Base network gas price in Gwei"
+            description="Network gas price in Gwei"
             min={1000}
             max={10000000}
             step={1000}
             unit="Gwei"
+            icon={<Zap size={20} />}
+            color="#F59E0B"
           />
         </div>
       </div>
 
       {/* Flash Loan Settings */}
-      <div className="bg-crypto-gray p-6 rounded-lg">
-        <h3 className="text-lg font-semibold text-white mb-4">Flash Loan Settings</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div style={cardStyle}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' }}>
+          <div style={{ 
+            backgroundColor: '#8B5CF620', 
+            borderRadius: '12px', 
+            padding: '12px',
+            color: '#8B5CF6'
+          }}>
+            <Activity size={24} />
+          </div>
+          <div>
+            <h3 style={{ fontSize: '20px', fontWeight: '600', margin: 0, color: '#ffffff' }}>
+              Flash Loan Configuration
+            </h3>
+            <p style={{ fontSize: '14px', color: '#9CA3AF', margin: 0 }}>
+              Advanced capital efficiency settings
+            </p>
+          </div>
+        </div>
+        
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
           <NumberInput
             id="flash_loan_amount"
             value={settings.FLASH_LOAN_AMOUNT_USD}
             onChange={(value) => handleInputChange('FLASH_LOAN_AMOUNT_USD', value)}
             label="Flash Loan Amount"
-            description="USD amount to borrow for flash loan arbitrage"
+            description="Capital to borrow for arbitrage execution"
             min={1000}
             max={1000000}
             step={1000}
             unit="USD"
+            icon={<DollarSign size={20} />}
+            color="#8B5CF6"
           />
         </div>
       </div>
 
-      {/* Warning Box */}
-      <div className="bg-yellow-900 border border-yellow-600 p-4 rounded-lg">
-        <div className="flex items-start space-x-3">
-          <svg className="w-5 h-5 text-yellow-400 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
-          </svg>
+      {/* Safety Warning */}
+      <div style={{
+        backgroundColor: '#F59E0B20',
+        border: '1px solid #F59E0B',
+        borderRadius: '12px',
+        padding: '20px',
+        marginBottom: '24px'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px' }}>
+          <div style={{ 
+            backgroundColor: '#F59E0B30', 
+            borderRadius: '8px', 
+            padding: '8px',
+            color: '#F59E0B'
+          }}>
+            <AlertTriangle size={20} />
+          </div>
           <div>
-            <h4 className="font-medium text-yellow-400">Important Safety Notice</h4>
-            <p className="text-yellow-300 text-sm mt-1">
-              Always test with small amounts first. Keep Simulation Mode enabled until you're confident in your settings. 
-              Real trading involves financial risk and these settings directly affect your trades.
+            <h4 style={{ fontSize: '16px', fontWeight: '600', color: '#F59E0B', margin: '0 0 8px 0' }}>
+              Safety Reminder
+            </h4>
+            <p style={{ fontSize: '14px', color: '#FCD34D', margin: 0, lineHeight: '1.5' }}>
+              Always test with Simulation Mode enabled before live trading. Start with small position sizes 
+              and gradually increase as you gain confidence. These settings directly affect your trading 
+              behavior and financial risk.
             </p>
           </div>
         </div>

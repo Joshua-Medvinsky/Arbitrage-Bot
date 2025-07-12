@@ -70,7 +70,9 @@
         "decorations": true,
         "alwaysOnTop": false,
         "skipTaskbar": false,
-        "label": "main"
+        "label": "main",
+        "visible": false,
+        "focus": false
       }
     ],
     "systemTray": {

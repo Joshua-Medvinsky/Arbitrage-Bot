@@ -111,3 +111,31 @@ export const getPlatformClasses = () => {
   
   return classes.join(' ')
 }
+
+// Arbitrage bot control functions
+export const startArbitrageBot = async () => {
+  if (isTauri()) {
+    const { invoke } = await import('@tauri-apps/api/tauri')
+    return await invoke('start_arbitrage_bot')
+  } else {
+    throw new Error('Arbitrage bot control is only available in desktop app')
+  }
+}
+
+export const stopArbitrageBot = async () => {
+  if (isTauri()) {
+    const { invoke } = await import('@tauri-apps/api/tauri')
+    return await invoke('stop_arbitrage_bot')
+  } else {
+    throw new Error('Arbitrage bot control is only available in desktop app')
+  }
+}
+
+export const getArbitrageBotStatus = async () => {
+  if (isTauri()) {
+    const { invoke } = await import('@tauri-apps/api/tauri')
+    return await invoke('get_arbitrage_bot_status')
+  } else {
+    return false
+  }
+}

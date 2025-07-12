@@ -23,6 +23,7 @@ body {
   min-width: 320px;
   min-height: 100vh;
   background: linear-gradient(135deg, #1A1D29 0%, #2D3748 100%);
+  overflow: hidden;
 }
 
 /* Remove default list styles */
@@ -40,6 +41,7 @@ li {
   width: 100%;
   height: 100vh;
   margin: 0;
+  overflow: hidden;
 }
 
 .profit-positive {
@@ -60,4 +62,14 @@ li {
 
 .status-simulation {
   background-color: #4ECDC4;
+}
+
+/* Pulse animation for status indicator */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }

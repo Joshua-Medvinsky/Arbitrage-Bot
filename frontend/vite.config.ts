@@ -7,6 +7,7 @@ export default defineConfig({
   server: {
     port: 3000,
     host: '0.0.0.0', // Allow external connections for mobile development
+    hmr: false, // Disable hot module replacement
     proxy: {
       '/api': {
         target: 'http://localhost:8000',
@@ -21,7 +22,9 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true,
+    sourcemap: false, // Disable sourcemaps for faster builds
+    minify: 'esbuild', // Use esbuild for faster minification
+    target: 'esnext', // Target modern browsers for smaller bundles
     rollupOptions: {
       output: {
         manualChunks: {
@@ -31,7 +34,19 @@ export default defineConfig({
           socket: ['socket.io-client']
         }
       }
-    }
+    },
+    // Optimize chunk size for faster loading
+    chunkSizeWarningLimit: 1000
+  },
+  // Enable dependency pre-bundling for faster dev startup
+  optimizeDeps: {
+    include: [
+      'react',
+      'react-dom',
+      'socket.io-client',
+      'recharts',
+      'lucide-react'
+    ]
   },
   // Ensure proper base URL for different platforms
   base: './',
