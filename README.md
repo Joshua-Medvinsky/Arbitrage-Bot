@@ -1,4 +1,4 @@
- # Arbitrage Bot for Base Network
+# Arbitrage Bot for Base Network
 
 ## Overview
 
@@ -397,3 +397,25 @@ FLASH_LOAN_MIN_PROFIT_USD = 50  # $50 minimum
 ---
 
 **Current Status**: Flash loan functionality is implemented and ready for testing. Currently disabled in safe mode for security.
+
+## 📱💻 Desktop & Mobile Apps
+
+Your arbitrage bot can be packaged as both desktop and mobile applications!
+
+### Quick Start for Apps
+
+1. **Install Node.js**: Download from [nodejs.org](https://nodejs.org/) (LTS version for Windows)
+2. **Check Prerequisites**: Run `frontend\check-setup.bat` to verify your setup
+3. **Choose Your Platform**:
+   - **Desktop**: Install Rust from [rustup.rs](https://rustup.rs/), then run `npm run tauri:dev`
+   - **Mobile**: Install Android Studio, then run `npm run mobile:dev`
+
+### Features
+
+- 🖥️ **Desktop App (Tauri)**: Native Windows/macOS/Linux application
+- 📱 **Mobile App (Capacitor)**: Android/iOS app with native device integration
+- 🎨 **Modern UI**: Beautiful React dashboard with real-time charts
+- 🔄 **Real-time Updates**: WebSocket connection to your Python bot
+- 🛡️ **Security**: Simulation mode, safe mode, and secure key handling
+
+See `frontend/DESKTOP_MOBILE_SETUP.md` for detailed instructions.

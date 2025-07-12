@@ -100,11 +100,14 @@ class ArbitrageExecutor:
     def __init__(self, private_key=None):
         self.w3 = w3
         self.account = None
-        if private_key:
-            self.account = self.w3.eth.account.from_key(private_key)
-            print(f"🔐 Loaded wallet: {self.account.address}")
+        if private_key and private_key != "your_private_key_here" and len(private_key) == 64:
+            try:
+                self.account = self.w3.eth.account.from_key(private_key)
+                print(f"🔐 Loaded wallet: {self.account.address}")
+            except Exception as e:
+                print(f"⚠️  Invalid private key - running in simulation mode: {e}")
         else:
-            print("⚠️  No private key provided - running in simulation mode")
+            print("⚠️  No valid private key provided - running in simulation mode")
         
         # Initialize contracts
         self.uniswap_router = w3.eth.contract(address=UNISWAP_V3_ROUTER, abi=UNISWAP_V3_ROUTER_ABI)
