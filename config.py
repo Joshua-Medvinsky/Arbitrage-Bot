@@ -27,29 +27,28 @@ EXECUTION_MODE = os.getenv("EXECUTION_MODE", "True").lower() == "true"
 SIMULATION_MODE = os.getenv("SIMULATION_MODE", "False").lower() == "true"
 SAFE_MODE = False
 FLASH_LOAN_ENABLED = False
-POSITION_SIZE_USD = 100000.0  # Increased for large test
+POSITION_SIZE_USD = 100.0  # Reduced from 100000 for testing
 
 # Position Sizing
-MIN_PROFIT_PCT = float(os.getenv("MIN_PROFIT_PCT", "1.0"))
+MIN_PROFIT_PCT = float(os.getenv("MIN_PROFIT_PCT", "0.1"))  # Reduced from 1.0 to 0.1
 MAX_PROFIT_PCT = float(os.getenv("MAX_PROFIT_PCT", "75.0"))
 
 # Risk Management
-MIN_LIQUIDITY_USD = float(os.getenv("MIN_LIQUIDITY_USD", "100000"))
+MIN_LIQUIDITY_USD = float(os.getenv("MIN_LIQUIDITY_USD", "10000"))  # Reduced from 100000
 MAX_SLIPPAGE = float(os.getenv("MAX_SLIPPAGE", "0.01"))
 DEFAULT_ETH_AMOUNT = float(os.getenv("DEFAULT_ETH_AMOUNT", "0.002"))
 DEFAULT_GAS_ETH = float(os.getenv("DEFAULT_GAS_ETH", "0.001"))
 
 # Gas Settings (Base Network)
-BASE_GAS_PRICE_GWEI = float(os.getenv("BASE_GAS_PRICE_GWEI", "0.1"))  # Use float for sub-1 gwei values
-GAS_LIMIT_SWAP = int(os.getenv("GAS_LIMIT_SWAP", "200000"))  # Reduced from 300000
-GAS_LIMIT_APPROVE = int(os.getenv("GAS_LIMIT_APPROVE", "50000"))  # Reduced from 100000
+BASE_GAS_PRICE_GWEI = float(os.getenv("BASE_GAS_PRICE_GWEI", "0.001"))  # Very low gas price for Base network
+# Gas limits are now calculated dynamically based on position size in estimate_profit()
 
 # Fee Settings
 DEFAULT_SLIPPAGE_PCT = float(os.getenv("DEFAULT_SLIPPAGE_PCT", "0.01"))
-TRANSACTION_FEE_PCT = float(os.getenv("TRANSACTION_FEE_PCT", "0.001"))  # Reduced from 0.003 to 0.001
-SLIPPAGE_PCT = float(os.getenv("SLIPPAGE_PCT", "0.005"))  # Reduced from 0.01 to 0.005
-MEV_PROTECTION_COST_USD = float(os.getenv("MEV_PROTECTION_COST_USD", "0.10"))  # Reduced from 1.0 to 0.10
-MIN_PROFIT_THRESHOLD_USD = float(os.getenv("MIN_PROFIT_THRESHOLD_USD", "5.0"))  # Increased from 0.50 to 5.0
+TRANSACTION_FEE_PCT = float(os.getenv("TRANSACTION_FEE_PCT", "0.0005"))  # 0.05% transaction fee
+SLIPPAGE_PCT = float(os.getenv("SLIPPAGE_PCT", "0.002"))  # 0.2% slippage
+MEV_PROTECTION_COST_USD = float(os.getenv("MEV_PROTECTION_COST_USD", "0.05"))  # Fixed MEV protection cost
+MIN_PROFIT_THRESHOLD_USD = float(os.getenv("MIN_PROFIT_THRESHOLD_USD", "0.10"))  # Minimum profit threshold
 
 # Flash Loan Settings
 FLASH_LOAN_AMOUNT_USD = float(os.getenv("FLASH_LOAN_AMOUNT_USD", "100000"))

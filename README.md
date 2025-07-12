@@ -2,7 +2,7 @@
 
 ## Overview
 
-A sophisticated arbitrage bot designed for the Base network that monitors Uniswap V3, SushiSwap, and Aerodrome DEXes for profitable trading opportunities. The bot features comprehensive safety checks, real-time execution capabilities, and fallback mechanisms for token handling.
+A sophisticated arbitrage bot designed for the Base network that monitors Uniswap V3, SushiSwap, Aerodrome, and Balancer V2 DEXes for profitable trading opportunities. The bot features comprehensive safety checks, real-time execution capabilities, and fallback mechanisms for token handling.
 
 ## Features
 
@@ -86,17 +86,17 @@ cp .env.example .env
 
 #### Simulation Mode (Safe Testing)
 ```bash
-# Edit script.py to set SIMULATION_MODE = True
-python script.py
+# Edit config.py to set SIMULATION_MODE = True
+python3 scripts/monitoring/arbitrage_bot.py
 ```
 
 #### Live Trading Mode
 ```bash
-# Edit script.py to set:
+# Edit config.py to set:
 # - SIMULATION_MODE = False
 # - EXECUTION_MODE = True
 # - Add your PRIVATE_KEY to .env
-python script.py
+python3 scripts/monitoring/arbitrage_bot.py
 ```
 
 ### Execution Modes

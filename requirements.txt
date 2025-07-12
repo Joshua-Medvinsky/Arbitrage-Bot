@@ -2,7 +2,6 @@
 web3==6.11.3
 aiohttp==3.9.1
 python-dotenv==1.0.0
-asyncio==3.4.3
 
 # Development dependencies
 pytest==7.4.3
@@ -12,7 +11,7 @@ black==23.11.0
 flake8==6.1.0
 mypy==1.7.1
 
-# Optional dependencies
+# Optional (for data analysis, not required for core bot)
 requests==2.31.0
 pandas==2.1.4
 numpy==1.25.2 
