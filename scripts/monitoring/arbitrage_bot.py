@@ -19,7 +19,7 @@ if sys.platform == "win32":
 # Add project root to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from config import PAIR_ABI, SUSHI_FACTORY_ABI, DEFAULT_ETH_AMOUNT, DEFAULT_GAS_ETH, DEFAULT_SLIPPAGE_PCT, USDC_ADDRESS, WETH_ADDRESS, ZORA_ADDRESS, SUSHI_FACTORY_ADDRESS, BASE_GAS_PRICE_GWEI, TRANSACTION_FEE_PCT, SLIPPAGE_PCT, MEV_PROTECTION_COST_USD, MIN_PROFIT_THRESHOLD_USD, SAFE_MODE, POSITION_SIZE_USD, FLASH_LOAN_ENABLED, EXECUTION_MODE, SIMULATION_MODE, MIN_PROFIT_PCT, MAX_PROFIT_PCT, MIN_LIQUIDITY_USD
+from config import PAIR_ABI, SUSHI_FACTORY_ABI, DEFAULT_ETH_AMOUNT, DEFAULT_GAS_ETH, DEFAULT_SLIPPAGE_PCT, USDC_ADDRESS, WETH_ADDRESS, ZORA_ADDRESS, SUSHI_FACTORY_ADDRESS, BASE_GAS_PRICE_GWEI, TRANSACTION_FEE_PCT, SLIPPAGE_PCT, MEV_PROTECTION_COST_USD, MIN_PROFIT_THRESHOLD_USD, SAFE_MODE, POSITION_SIZE_USD, FLASH_LOAN_ENABLED, EXECUTION_MODE, SIMULATION_MODE, MIN_PROFIT_PCT, MAX_PROFIT_PCT, MIN_LIQUIDITY_USD, ENABLE_UNISWAP_V3, ENABLE_SUSHISWAP, ENABLE_AERODROME, ENABLE_BALANCER_V2, UNISWAP_MAX_POOLS, SUSHISWAP_MAX_PAIRS, AERODROME_MAX_POOLS, BALANCER_MAX_POOLS
 from scripts.monitoring.token_addresses import TOKEN_ADDRESSES, WETH_BASE, USDC_BASE, weETH_BASE
 
 load_dotenv()
@@ -356,40 +356,42 @@ POOL_CACHE = {}
 async def get_all_prices_parallel():
     """Get all DEX prices in parallel for better performance"""
     try:
-        # Parallel execution of all DEX price fetching
-        uniswap_prices, aerodrome_prices, balancer_v2_prices, sushiswap_prices = await asyncio.gather(
-            get_uniswap_prices(),
-            get_aerodrome_prices(),
-            get_balancer_v2_prices(),
-            get_sushiswap_prices(),
-            return_exceptions=True
-        )
+        # Create list of enabled DEX functions
+        enabled_dex_functions = []
+        enabled_dex_names = []
+        
+        if ENABLE_UNISWAP_V3:
+            enabled_dex_functions.append(get_uniswap_prices())
+            enabled_dex_names.append('Uniswap')
+        
+        if ENABLE_SUSHISWAP:
+            enabled_dex_functions.append(get_sushiswap_prices())
+            enabled_dex_names.append('SushiSwap')
+        
+        if ENABLE_AERODROME:
+            enabled_dex_functions.append(get_aerodrome_prices())
+            enabled_dex_names.append('Aerodrome')
+        
+        if ENABLE_BALANCER_V2:
+            enabled_dex_functions.append(get_balancer_v2_prices())
+            enabled_dex_names.append('Balancer V2')
+        
+        if not enabled_dex_functions:
+            print("❌ No DEXes enabled! Please enable at least one DEX in config.py")
+            return {}
+        
+        # Parallel execution of enabled DEX price fetching
+        dex_results = await asyncio.gather(*enabled_dex_functions, return_exceptions=True)
         
         # Handle any exceptions from individual DEX calls
         prices = {}
-        if not isinstance(uniswap_prices, Exception):
-            prices['Uniswap'] = uniswap_prices
-        else:
-            print(f"❌ Uniswap error: {uniswap_prices}")
-            prices['Uniswap'] = {}
-            
-        if not isinstance(aerodrome_prices, Exception):
-            prices['Aerodrome'] = aerodrome_prices
-        else:
-            print(f"❌ Aerodrome error: {aerodrome_prices}")
-            prices['Aerodrome'] = {}
-            
-        if not isinstance(balancer_v2_prices, Exception):
-            prices['Balancer V2'] = balancer_v2_prices
-        else:
-            print(f"❌ Balancer V2 error: {balancer_v2_prices}")
-            prices['Balancer V2'] = {}
-            
-        if not isinstance(sushiswap_prices, Exception):
-            prices['SushiSwap'] = sushiswap_prices
-        else:
-            print(f"❌ SushiSwap error: {sushiswap_prices}")
-            prices['SushiSwap'] = {}
+        for i, result in enumerate(dex_results):
+            dex_name = enabled_dex_names[i]
+            if not isinstance(result, Exception):
+                prices[dex_name] = result
+            else:
+                print(f"❌ {dex_name} error: {result}")
+                prices[dex_name] = {}
         
         return prices
         
@@ -490,6 +492,20 @@ async def monitor_continuously():
     print(f"📊 Dashboard Update: {DASHBOARD_UPDATE_INTERVAL}s")
     print(f"🛡️  Safe Mode: {'ENABLED' if SAFE_MODE else 'DISABLED'}")
     print(f"🚀 Flash Loan Enabled: {FLASH_LOAN_ENABLED}")
+    
+    # Display enabled DEXes
+    enabled_dexes = []
+    if ENABLE_UNISWAP_V3:
+        enabled_dexes.append("Uniswap V3")
+    if ENABLE_SUSHISWAP:
+        enabled_dexes.append("SushiSwap")
+    if ENABLE_AERODROME:
+        enabled_dexes.append("Aerodrome")
+    if ENABLE_BALANCER_V2:
+        enabled_dexes.append("Balancer V2")
+    
+    print(f"📊 Enabled DEXes: {', '.join(enabled_dexes)}")
+    print(f"⚡ Performance Limits: Uniswap({UNISWAP_MAX_POOLS}), SushiSwap({SUSHISWAP_MAX_PAIRS}), Aerodrome({AERODROME_MAX_POOLS}), Balancer({BALANCER_MAX_POOLS})")
     print("\nPress Ctrl+C to stop monitoring\n")
     
     # Start dashboard thread
@@ -578,6 +594,10 @@ async def get_uniswap_prices():
                 pools = result.get("data", {}).get("pools", [])
                 print(f"Found {len(pools)} Uniswap pools")
                 
+                # Limit pools for performance
+                pools = pools[:UNISWAP_MAX_POOLS]
+                print(f"Processing first {len(pools)} pools (limited for performance)")
+                
                 prices = {}
                 processed_count = 0
                 for i, pool in enumerate(pools):
@@ -651,6 +671,10 @@ async def get_aerodrome_prices():
                 
                 pairs = result.get("data", {}).get("pools", [])
                 print(f"Found {len(pairs)} Aerodrome pools")
+                
+                # Limit pools for performance
+                pairs = pairs[:AERODROME_MAX_POOLS]
+                print(f"Processing first {len(pairs)} pools (limited for performance)")
                 
                 prices = {}
                 processed_count = 0
@@ -749,7 +773,7 @@ async def get_balancer_v2_prices():
                 processed_count = 0
                 
                 # Limit to first 100 pools for performance
-                pool_ids_to_query = pool_ids[:100]
+                pool_ids_to_query = pool_ids[:BALANCER_MAX_POOLS]
                 
                 for i, pool_id in enumerate(pool_ids_to_query):
                     if i % 10 == 0:
@@ -908,7 +932,7 @@ async def get_sushiswap_prices():
             return {}
         
         # Limit to first 100 pairs for performance
-        pairs_to_check = min(pair_count, 100)
+        pairs_to_check = min(pair_count, SUSHISWAP_MAX_PAIRS)
         print(f"   Checking first {pairs_to_check} pairs...")
         
         prices = {}
