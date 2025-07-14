@@ -34,7 +34,6 @@ def setup_dual_logging():
                 
                 # Get console handles
                 STD_OUTPUT_HANDLE = -11
-                STD_ERROR_HANDLE = -12
                 
                 h_stdout = ctypes.windll.kernel32.GetStdHandle(STD_OUTPUT_HANDLE)
                 if h_stdout and h_stdout != -1:
@@ -65,38 +64,10 @@ original_print = print
 dual_print = setup_dual_logging()
 print = dual_print
 
-# Function to ensure terminal visibility
-def ensure_terminal_output(message):
-    """Ensure message appears in terminal even when run through frontend"""
-    print(message)  # This will use our dual_print function
-    
-    # Additional direct terminal writing for Windows
-    if sys.platform == "win32":
-        try:
-            # Allocate a new console if one doesn't exist
-            import ctypes
-            kernel32 = ctypes.windll.kernel32
-            
-            # Try to allocate console (this may fail if console already exists)
-            try:
-                kernel32.AllocConsole()
-            except:
-                pass
-            
-            # Get the console window and make it visible
-            console_window = kernel32.GetConsoleWindow()
-            if console_window:
-                user32 = ctypes.windll.user32
-                # SW_SHOW = 5, SW_RESTORE = 9
-                user32.ShowWindow(console_window, 5)
-                
-        except Exception as e:
-            pass
-
 # Add project root to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from config import PAIR_ABI, SUSHI_FACTORY_ABI, DEFAULT_ETH_AMOUNT, DEFAULT_GAS_ETH, DEFAULT_SLIPPAGE_PCT, USDC_ADDRESS, WETH_ADDRESS, ZORA_ADDRESS, SUSHI_FACTORY_ADDRESS, BASE_GAS_PRICE_GWEI, TRANSACTION_FEE_PCT, SLIPPAGE_PCT, MEV_PROTECTION_COST_USD, MIN_PROFIT_THRESHOLD_USD, SAFE_MODE, POSITION_SIZE_USD, FLASH_LOAN_ENABLED, EXECUTION_MODE, SIMULATION_MODE, MIN_PROFIT_PCT, MAX_PROFIT_PCT, MIN_LIQUIDITY_USD
+from config import PAIR_ABI, SUSHI_FACTORY_ABI, DEFAULT_ETH_AMOUNT, DEFAULT_GAS_ETH, DEFAULT_SLIPPAGE_PCT, USDC_ADDRESS, WETH_ADDRESS, ZORA_ADDRESS, SUSHI_FACTORY_ADDRESS, BASE_GAS_PRICE_GWEI, TRANSACTION_FEE_PCT, SLIPPAGE_PCT, MEV_PROTECTION_COST_USD, MIN_PROFIT_THRESHOLD_USD, SAFE_MODE, POSITION_SIZE_USD, FLASH_LOAN_ENABLED, EXECUTION_MODE, SIMULATION_MODE, MIN_PROFIT_PCT, MAX_PROFIT_PCT, MIN_LIQUIDITY_USD, ENABLE_UNISWAP_V3, ENABLE_SUSHISWAP, ENABLE_AERODROME, ENABLE_BALANCER_V2, UNISWAP_MAX_POOLS, SUSHISWAP_MAX_PAIRS, AERODROME_MAX_POOLS, BALANCER_MAX_POOLS
 from scripts.monitoring.token_addresses import TOKEN_ADDRESSES, WETH_BASE, USDC_BASE, weETH_BASE
 
 load_dotenv()
@@ -433,40 +404,42 @@ POOL_CACHE = {}
 async def get_all_prices_parallel():
     """Get all DEX prices in parallel for better performance"""
     try:
-        # Parallel execution of all DEX price fetching
-        uniswap_prices, aerodrome_prices, balancer_v2_prices, sushiswap_prices = await asyncio.gather(
-            get_uniswap_prices(),
-            get_aerodrome_prices(),
-            get_balancer_v2_prices(),
-            get_sushiswap_prices(),
-            return_exceptions=True
-        )
+        # Create list of enabled DEX functions
+        enabled_dex_functions = []
+        enabled_dex_names = []
+        
+        if ENABLE_UNISWAP_V3:
+            enabled_dex_functions.append(get_uniswap_prices())
+            enabled_dex_names.append('Uniswap')
+        
+        if ENABLE_SUSHISWAP:
+            enabled_dex_functions.append(get_sushiswap_prices())
+            enabled_dex_names.append('SushiSwap')
+        
+        if ENABLE_AERODROME:
+            enabled_dex_functions.append(get_aerodrome_prices())
+            enabled_dex_names.append('Aerodrome')
+        
+        if ENABLE_BALANCER_V2:
+            enabled_dex_functions.append(get_balancer_v2_prices())
+            enabled_dex_names.append('Balancer V2')
+        
+        if not enabled_dex_functions:
+            print("❌ No DEXes enabled! Please enable at least one DEX in config.py")
+            return {}
+        
+        # Parallel execution of enabled DEX price fetching
+        dex_results = await asyncio.gather(*enabled_dex_functions, return_exceptions=True)
         
         # Handle any exceptions from individual DEX calls
         prices = {}
-        if not isinstance(uniswap_prices, Exception):
-            prices['Uniswap'] = uniswap_prices
-        else:
-            print(f"❌ Uniswap error: {uniswap_prices}")
-            prices['Uniswap'] = {}
-            
-        if not isinstance(aerodrome_prices, Exception):
-            prices['Aerodrome'] = aerodrome_prices
-        else:
-            print(f"❌ Aerodrome error: {aerodrome_prices}")
-            prices['Aerodrome'] = {}
-            
-        if not isinstance(balancer_v2_prices, Exception):
-            prices['Balancer V2'] = balancer_v2_prices
-        else:
-            print(f"❌ Balancer V2 error: {balancer_v2_prices}")
-            prices['Balancer V2'] = {}
-            
-        if not isinstance(sushiswap_prices, Exception):
-            prices['SushiSwap'] = sushiswap_prices
-        else:
-            print(f"❌ SushiSwap error: {sushiswap_prices}")
-            prices['SushiSwap'] = {}
+        for i, result in enumerate(dex_results):
+            dex_name = enabled_dex_names[i]
+            if not isinstance(result, Exception):
+                prices[dex_name] = result
+            else:
+                print(f"❌ {dex_name} error: {result}")
+                prices[dex_name] = {}
         
         return prices
         
@@ -566,18 +539,31 @@ async def monitor_continuously():
     executor = ArbitrageExecutor(PRIVATE_KEY)
     dashboard = MonitoringDashboard()
     
-    # Use enhanced terminal output for startup messages
-    ensure_terminal_output("🚀 Starting continuous arbitrage monitoring...")
-    ensure_terminal_output(f"🔧 Execution Mode: {'LIVE' if EXECUTION_MODE else 'SIMULATION'}")
-    ensure_terminal_output(f"📊 Simulation Mode: {'ENABLED' if SIMULATION_MODE else 'DISABLED'}")
-    ensure_terminal_output(f"💰 Position Size: ${POSITION_SIZE_USD:,.0f}")
-    ensure_terminal_output(f"📊 Profit Range: {MIN_PROFIT_PCT}%-{MAX_PROFIT_PCT}%")
-    ensure_terminal_output(f"💧 Min Liquidity: ${MIN_LIQUIDITY_USD:,.0f}")
-    ensure_terminal_output(f"⏱️  Monitoring Interval: {MONITORING_INTERVAL_SECONDS}s")
-    ensure_terminal_output(f"📊 Dashboard Update: {DASHBOARD_UPDATE_INTERVAL}s")
-    ensure_terminal_output(f"🛡️  Safe Mode: {'ENABLED' if SAFE_MODE else 'DISABLED'}")
-    ensure_terminal_output(f"🚀 Flash Loan Enabled: {FLASH_LOAN_ENABLED}")
-    ensure_terminal_output("\nPress Ctrl+C to stop monitoring\n")
+    print(f"🚀 Starting continuous arbitrage monitoring...")
+    print(f"🔧 Execution Mode: {'LIVE' if EXECUTION_MODE else 'SIMULATION'}")
+    print(f"📊 Simulation Mode: {'ENABLED' if SIMULATION_MODE else 'DISABLED'}")
+    print(f"💰 Position Size: ${POSITION_SIZE_USD:,.0f}")
+    print(f"📊 Profit Range: {MIN_PROFIT_PCT}%-{MAX_PROFIT_PCT}%")
+    print(f"💧 Min Liquidity: ${MIN_LIQUIDITY_USD:,.0f}")
+    print(f"⏱️  Monitoring Interval: {MONITORING_INTERVAL_SECONDS}s")
+    print(f"📊 Dashboard Update: {DASHBOARD_UPDATE_INTERVAL}s")
+    print(f"🛡️  Safe Mode: {'ENABLED' if SAFE_MODE else 'DISABLED'}")
+    print(f"🚀 Flash Loan Enabled: {FLASH_LOAN_ENABLED}")
+    
+    # Display enabled DEXes
+    enabled_dexes = []
+    if ENABLE_UNISWAP_V3:
+        enabled_dexes.append("Uniswap V3")
+    if ENABLE_SUSHISWAP:
+        enabled_dexes.append("SushiSwap")
+    if ENABLE_AERODROME:
+        enabled_dexes.append("Aerodrome")
+    if ENABLE_BALANCER_V2:
+        enabled_dexes.append("Balancer V2")
+    
+    print(f"📊 Enabled DEXes: {', '.join(enabled_dexes)}")
+    print(f"⚡ Performance Limits: Uniswap({UNISWAP_MAX_POOLS}), SushiSwap({SUSHISWAP_MAX_PAIRS}), Aerodrome({AERODROME_MAX_POOLS}), Balancer({BALANCER_MAX_POOLS})")
+    print("\nPress Ctrl+C to stop monitoring\n")
     
     # Start dashboard thread
     dashboard.start_dashboard_thread()
@@ -665,6 +651,10 @@ async def get_uniswap_prices():
                 pools = result.get("data", {}).get("pools", [])
                 print(f"Found {len(pools)} Uniswap pools")
                 
+                # Limit pools for performance
+                pools = pools[:UNISWAP_MAX_POOLS]
+                print(f"Processing first {len(pools)} pools (limited for performance)")
+                
                 prices = {}
                 processed_count = 0
                 for i, pool in enumerate(pools):
@@ -738,6 +728,10 @@ async def get_aerodrome_prices():
                 
                 pairs = result.get("data", {}).get("pools", [])
                 print(f"Found {len(pairs)} Aerodrome pools")
+                
+                # Limit pools for performance
+                pairs = pairs[:AERODROME_MAX_POOLS]
+                print(f"Processing first {len(pairs)} pools (limited for performance)")
                 
                 prices = {}
                 processed_count = 0
@@ -836,7 +830,7 @@ async def get_balancer_v2_prices():
                 processed_count = 0
                 
                 # Limit to first 100 pools for performance
-                pool_ids_to_query = pool_ids[:100]
+                pool_ids_to_query = pool_ids[:BALANCER_MAX_POOLS]
                 
                 for i, pool_id in enumerate(pool_ids_to_query):
                     if i % 10 == 0:
@@ -995,7 +989,7 @@ async def get_sushiswap_prices():
             return {}
         
         # Limit to first 100 pairs for performance
-        pairs_to_check = min(pair_count, 100)
+        pairs_to_check = min(pair_count, SUSHISWAP_MAX_PAIRS)
         print(f"   Checking first {pairs_to_check} pairs...")
         
         prices = {}
