@@ -1,5 +1,7 @@
 import { ArbitrageOpportunity, BotStatus, Portfolio, LogEntry } from '../App'
-import { TrendingUp, Activity, DollarSign, Target, Shield, Play, Square, BarChart3, Clock, Users, Zap, ScrollText, AlertCircle, CheckCircle, Info, XCircle } from 'lucide-react'
+import { TrendingUp, Activity, DollarSign, Target, Shield, Play, Square, BarChart3, Clock, Users, ScrollText, AlertCircle, CheckCircle, Info, XCircle, Wifi, WifiOff } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { getBotStatus, startBotLocal, stopBotLocal, toggleTradingMode, toggleSafeMode, type LocalBotState } from '../utils/botControl'
 
 interface HomeProps {
   opportunities: ArbitrageOpportunity[]
@@ -7,6 +9,7 @@ interface HomeProps {
   portfolio: Portfolio
   isConnected: boolean
   logs: LogEntry[]
+  socket?: any // Add socket for server sync
   onStart: () => void
   onStop: () => void
   onToggleMode: () => void
@@ -20,12 +23,292 @@ const Home = ({
   portfolio,
   isConnected,
   logs,
+  socket,
   onStart,
   onStop,
   onToggleMode,
   onToggleSafeMode,
   onExecuteTrade
 }: HomeProps) => {
+  const [localBotState, setLocalBotState] = useState<LocalBotState | null>(null)
+
+  // Load local bot state on component mount
+  useEffect(() => {
+    const loadLocalState = async () => {
+      try {
+        const state = await getBotStatus()
+        setLocalBotState(state)
+        console.log('Loaded local bot state:', state)
+      } catch (error) {
+        console.error('Failed to load local bot state:', error)
+        // Set a default state that matches the current .env settings
+        const fallbackState = {
+          isRunning: false,
+          mode: 'live' as const, // Based on .env: SIMULATION_MODE=false
+          safeMode: true, // Based on .env: SAFE_MODE=true
+          sessionTrades: 0,
+          sessionProfit: 0
+        }
+        setLocalBotState(fallbackState)
+        console.log('Using fallback bot state:', fallbackState)
+      }
+    }
+    loadLocalState()
+  }, [])
+
+  // Debug: Log server status changes
+  useEffect(() => {
+    console.log('Server status prop changed:', {
+      isRunning: status.isRunning,
+      mode: status.mode,
+      safeMode: status.safeMode,
+      isConnected
+    })
+  }, [status.isRunning, status.mode, status.safeMode, isConnected])
+
+  // Handle connection loss in live mode - auto-stop bot
+  useEffect(() => {
+    if (localBotState && localBotState.mode === 'live' && !isConnected && localBotState.isRunning) {
+      // Connection lost while bot was running in live mode - stop the bot
+      console.log('Connection lost in live mode - stopping bot automatically')
+      const stopBotDueToConnectionLoss = async () => {
+        try {
+          // Stop the bot locally first to update UI immediately
+          const updatedState = { ...localBotState, isRunning: false }
+          setLocalBotState(updatedState)
+          
+          // Try to stop the bot via Tauri if possible
+          try {
+            await stopBotLocal()
+            console.log('Bot successfully stopped due to connection loss in live mode')
+          } catch (taruiError) {
+            console.warn('Could not stop bot via Tauri, but local state updated:', taruiError)
+          }
+        } catch (error) {
+          console.error('Failed to handle connection loss:', error)
+        }
+      }
+      stopBotDueToConnectionLoss()
+    }
+  }, [isConnected, localBotState?.mode, localBotState?.isRunning, localBotState])
+
+  // Update local state when connection status changes (for re-rendering)
+  useEffect(() => {
+    // This effect is just to trigger re-renders when connection status changes
+    // The actual logic is handled in the component functions
+  }, [isConnected, localBotState?.mode])
+
+  // Sync local state with server when connection is restored
+  useEffect(() => {
+    if (isConnected && localBotState && socket?.connected) {
+      // Sync any local changes made while offline
+      try {
+        socket.emit('sync_bot_state', {
+          isRunning: localBotState.isRunning,
+          mode: localBotState.mode,
+          safeMode: localBotState.safeMode,
+          sessionTrades: localBotState.sessionTrades,
+          sessionProfit: localBotState.sessionProfit
+        })
+        console.log('Bot state synced with server after reconnection:', {
+          mode: localBotState.mode,
+          isRunning: localBotState.isRunning,
+          safeMode: localBotState.safeMode
+        })
+      } catch (error) {
+        console.warn('Failed to sync bot state with server:', error)
+      }
+    }
+  }, [isConnected, localBotState, socket])
+
+  // Update local state when server status changes (for live mode)
+  useEffect(() => {
+    if (localBotState && isConnected && localBotState.mode === 'live') {
+      // In live mode when connected, only sync the running status from server
+      // Keep mode and safeMode from local state (which comes from .env)
+      if (status.isRunning !== localBotState.isRunning) {
+        
+        const syncedState = {
+          ...localBotState,
+          isRunning: status.isRunning,
+          // Don't override mode and safeMode - keep local values from .env
+        }
+        
+        // Only update if there's actually a change to prevent loops
+        console.log('Local running status synced with server:', { 
+          isRunning: status.isRunning, 
+          keepingLocalMode: localBotState.mode,
+          keepingLocalSafeMode: localBotState.safeMode 
+        })
+        setLocalBotState(syncedState)
+      }
+    }
+  }, [status.isRunning, localBotState?.mode, localBotState?.isRunning, isConnected])
+
+  // Get effective bot status (prioritize local state when available)
+  const effectiveBotStatus = (() => {
+    if (localBotState) {
+      // Use local state when available
+      let effectiveIsRunning = localBotState.isRunning
+      
+      // In live mode without connection, bot cannot be running
+      if (localBotState.mode === 'live' && !isConnected) {
+        effectiveIsRunning = false
+      }
+      
+      return {
+        ...status,
+        isRunning: effectiveIsRunning,
+        mode: localBotState.mode,
+        safeMode: localBotState.safeMode
+      }
+    }
+    // Fall back to server status only when local state is not available
+    return status
+  })()
+
+  // Determine if controls should be enabled based on mode and connection
+  const canControlBot = (() => {
+    if (!localBotState) return false // Can't control if we don't know the state
+    
+    if (localBotState.mode === 'simulation') {
+      // Simulation mode: always allow controls (offline capable)
+      return true
+    } else {
+      // Live mode: require connection for bot controls
+      return isConnected
+    }
+  })()
+
+  // Handle bot start with mode awareness
+  const handleStart = async () => {
+    if (!localBotState) return
+    
+    if (localBotState.mode === 'simulation') {
+      // Simulation mode: always use local control
+      const result = await startBotLocal()
+      if (result.success) {
+        const updatedState = { ...localBotState, isRunning: true, lastStartTime: Date.now() }
+        setLocalBotState(updatedState)
+      }
+    } else if (localBotState.mode === 'live' && isConnected) {
+      // Live mode: use server control when connected, but also update local state optimistically
+      try {
+        // Optimistically update local state for immediate UI feedback
+        const optimisticState = { ...localBotState, isRunning: true, lastStartTime: Date.now() }
+        setLocalBotState(optimisticState)
+        
+        // Call server function
+        onStart()
+        
+        console.log('Bot start initiated for live mode')
+      } catch (error) {
+        console.error('Failed to start bot in live mode:', error)
+        // Revert optimistic update on error
+        setLocalBotState(localBotState)
+      }
+    } else if (localBotState.mode === 'live' && !isConnected) {
+      // Live mode when offline: show error message
+      console.warn('Cannot start bot in live mode without internet connection')
+      // Could add a toast notification here in the future
+    }
+  }
+
+  // Handle bot stop with mode awareness
+  const handleStop = async () => {
+    if (!localBotState) return
+    
+    if (localBotState.mode === 'simulation') {
+      // Simulation mode: always use local control
+      const result = await stopBotLocal()
+      if (result.success) {
+        const updatedState = { ...localBotState, isRunning: false }
+        setLocalBotState(updatedState)
+      }
+    } else if (isConnected) {
+      // Live mode: use server control when connected, but also update local state optimistically
+      try {
+        // Optimistically update local state for immediate UI feedback
+        const optimisticState = { ...localBotState, isRunning: false }
+        setLocalBotState(optimisticState)
+        
+        // Call server function
+        onStop()
+        
+        console.log('Bot stop initiated for live mode')
+      } catch (error) {
+        console.error('Failed to stop bot in live mode:', error)
+        // Revert optimistic update on error
+        setLocalBotState(localBotState)
+      }
+    } else {
+      // Live mode when offline: force stop locally (shouldn't be running anyway)
+      const updatedState = { ...localBotState, isRunning: false }
+      setLocalBotState(updatedState)
+    }
+  }
+
+  // Handle mode toggle with mode awareness
+  const handleToggleMode = async () => {
+    if (!localBotState) return
+    
+    if (!isConnected) {
+      // When offline: always use local control
+      const result = await toggleTradingMode()
+      if (result.success) {
+        const updatedState = { ...localBotState, mode: result.newMode }
+        setLocalBotState(updatedState)
+      }
+    } else {
+      // When connected: use local control first, then notify server
+      try {
+        // Update local state first (this updates .env file)
+        const result = await toggleTradingMode()
+        if (result.success) {
+          const updatedState = { ...localBotState, mode: result.newMode }
+          setLocalBotState(updatedState)
+          
+          // Then notify server of the change
+          onToggleMode()
+          
+          console.log('Mode toggle completed:', result.newMode)
+        }
+      } catch (error) {
+        console.error('Failed to toggle mode:', error)
+      }
+    }
+  }
+
+  // Handle safe mode toggle with mode awareness
+  const handleToggleSafeMode = async () => {
+    if (!localBotState) return
+    
+    if (!isConnected) {
+      // When offline: always use local control
+      const result = await toggleSafeMode()
+      if (result.success) {
+        const updatedState = { ...localBotState, safeMode: result.newSafeMode }
+        setLocalBotState(updatedState)
+      }
+    } else {
+      // When connected: use local control first, then notify server
+      try {
+        // Update local state first (this updates .env file)
+        const result = await toggleSafeMode()
+        if (result.success) {
+          const updatedState = { ...localBotState, safeMode: result.newSafeMode }
+          setLocalBotState(updatedState)
+          
+          // Then notify server of the change
+          onToggleSafeMode()
+          
+          console.log('Safe mode toggle completed:', result.newSafeMode)
+        }
+      } catch (error) {
+        console.error('Failed to toggle safe mode:', error)
+      }
+    }
+  }
   const cardStyle = {
     backgroundColor: '#1A1F2E',
     border: '1px solid #2D3748',
@@ -145,29 +428,6 @@ const Home = ({
             </div>
           </div>
         </div>
-
-        {/* Active Opportunities */}
-        <div style={smallCardStyle}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div>
-              <p style={{ color: '#9CA3AF', fontSize: '14px', margin: '0 0 4px 0' }}>Active Opportunities</p>
-              <p style={{ fontSize: '28px', fontWeight: '700', margin: 0, color: '#ffffff' }}>
-                {opportunities.length}
-              </p>
-              <p style={{ fontSize: '14px', margin: '4px 0 0 0', color: '#9CA3AF' }}>
-                Avg profit: 2.3%
-              </p>
-            </div>
-            <div style={{ 
-              backgroundColor: '#10B98120', 
-              borderRadius: '12px', 
-              padding: '12px',
-              color: '#10B981'
-            }}>
-              <Zap size={24} />
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* Main Content Grid */}
@@ -181,60 +441,128 @@ const Home = ({
               <h3 style={{ fontSize: '20px', fontWeight: '600', margin: 0, color: '#ffffff' }}>
                 Trading Bot Controls
               </h3>
-              <div style={{ 
-                padding: '4px 12px', 
-                borderRadius: '20px', 
-                backgroundColor: status.isRunning ? '#00D4AA20' : '#FF6B6B20',
-                color: status.isRunning ? '#00D4AA' : '#FF6B6B',
-                fontSize: '12px',
-                fontWeight: '600'
-              }}>
-                {status.isRunning ? 'ACTIVE' : 'INACTIVE'}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                {/* Mode indicator */}
+                <div style={{ 
+                  padding: '4px 12px', 
+                  borderRadius: '20px', 
+                  backgroundColor: effectiveBotStatus.mode === 'simulation' ? '#4F46E520' : '#F59E0B20',
+                  color: effectiveBotStatus.mode === 'simulation' ? '#4F46E5' : '#F59E0B',
+                  fontSize: '12px',
+                  fontWeight: '600'
+                }}>
+                  {effectiveBotStatus.mode === 'simulation' ? 'SIMULATION' : 'LIVE TRADING'}
+                </div>
+                {/* Status indicator */}
+                <div style={{ 
+                  padding: '4px 12px', 
+                  borderRadius: '20px', 
+                  backgroundColor: effectiveBotStatus.isRunning ? '#00D4AA20' : '#FF6B6B20',
+                  color: effectiveBotStatus.isRunning ? '#00D4AA' : '#FF6B6B',
+                  fontSize: '12px',
+                  fontWeight: '600'
+                }}>
+                  {effectiveBotStatus.isRunning ? 'ACTIVE' : 'INACTIVE'}
+                </div>
               </div>
             </div>
+
+            {/* Connection status warning for live mode */}
+            {effectiveBotStatus.mode === 'live' && !isConnected && (
+              <div style={{
+                padding: '12px',
+                borderRadius: '8px',
+                backgroundColor: '#FF6B6B20',
+                border: '1px solid #FF6B6B',
+                marginBottom: '16px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                <WifiOff size={16} style={{ color: '#FF6B6B' }} />
+                <span style={{ color: '#FF6B6B', fontSize: '14px', fontWeight: '500' }}>
+                  {localBotState?.isRunning ? 
+                    'Connection lost - bot automatically stopped. Live trading requires internet connection.' :
+                    'Live trading requires internet connection. Bot controls disabled until reconnected.'
+                  }
+                </span>
+              </div>
+            )}
+
+            {/* Simulation mode indicator - shown for both online and offline */}
+            {effectiveBotStatus.mode === 'simulation' && (
+              <div style={{
+                padding: '12px',
+                borderRadius: '8px',
+                backgroundColor: '#4F46E520',
+                border: '1px solid #4F46E5',
+                marginBottom: '16px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                <Shield size={16} style={{ color: '#4F46E5' }} />
+                <span style={{ color: '#4F46E5', fontSize: '14px', fontWeight: '500' }}>
+                  Simulation mode: Safe testing environment with mock data. No real money at risk.
+                </span>
+              </div>
+            )}
             
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
               <button
-                onClick={status.isRunning ? onStop : onStart}
+                onClick={effectiveBotStatus.isRunning ? handleStop : handleStart}
+                disabled={!canControlBot}
                 style={{
                   ...buttonStyle,
-                  backgroundColor: status.isRunning ? '#FF6B6B' : '#00D4AA',
+                  backgroundColor: canControlBot 
+                    ? (effectiveBotStatus.isRunning ? '#FF6B6B' : '#00D4AA')
+                    : '#6B7280',
                   color: '#ffffff',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px',
-                  justifyContent: 'center'
+                  justifyContent: 'center',
+                  opacity: canControlBot ? 1 : 0.5,
+                  cursor: canControlBot ? 'pointer' : 'not-allowed'
                 }}
               >
-                {status.isRunning ? <Square size={16} /> : <Play size={16} />}
-                {status.isRunning ? 'Stop Bot' : 'Start Bot'}
+                {effectiveBotStatus.isRunning ? <Square size={16} /> : <Play size={16} />}
+                {effectiveBotStatus.isRunning ? 'Stop Bot' : 'Start Bot'}
               </button>
               
               <button
-                onClick={onToggleMode}
+                onClick={handleToggleMode}
+                disabled={effectiveBotStatus.isRunning || (!isConnected && effectiveBotStatus.mode === 'live')}
                 style={{
                   ...buttonStyle,
-                  backgroundColor: status.mode === 'simulation' ? '#4F46E5' : '#F59E0B',
-                  color: '#ffffff'
+                  backgroundColor: effectiveBotStatus.mode === 'simulation' ? '#4F46E5' : '#F59E0B',
+                  color: '#ffffff',
+                  opacity: (effectiveBotStatus.isRunning || (!isConnected && effectiveBotStatus.mode === 'live')) ? 0.5 : 1,
+                  cursor: (effectiveBotStatus.isRunning || (!isConnected && effectiveBotStatus.mode === 'live')) ? 'not-allowed' : 'pointer'
                 }}
               >
-                {status.mode === 'simulation' ? 'Simulation Mode' : 'Live Trading'}
+                {effectiveBotStatus.mode === 'simulation' ? 'Simulation Mode' : 'Live Trading'}
               </button>
               
               <button
-                onClick={onToggleSafeMode}
+                onClick={handleToggleSafeMode}
+                disabled={!canControlBot}
                 style={{
                   ...buttonStyle,
-                  backgroundColor: status.safeMode ? '#10B981' : '#6B7280',
+                  backgroundColor: canControlBot 
+                    ? (effectiveBotStatus.safeMode ? '#10B981' : '#6B7280')
+                    : '#6B7280',
                   color: '#ffffff',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px',
-                  justifyContent: 'center'
+                  justifyContent: 'center',
+                  opacity: canControlBot ? 1 : 0.5,
+                  cursor: canControlBot ? 'pointer' : 'not-allowed'
                 }}
               >
                 <Shield size={16} />
-                {status.safeMode ? 'Safe Mode ON' : 'Safe Mode OFF'}
+                {effectiveBotStatus.safeMode ? 'Safe Mode ON' : 'Safe Mode OFF'}
               </button>
             </div>
           </div>
@@ -243,19 +571,63 @@ const Home = ({
           <div style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h3 style={{ fontSize: '20px', fontWeight: '600', margin: 0, color: '#ffffff' }}>
-                Live Arbitrage Opportunities
+                {effectiveBotStatus.mode === 'simulation' ? 'Simulated' : 'Live'} Arbitrage Opportunities
               </h3>
-              <div style={{ 
-                padding: '4px 12px', 
-                borderRadius: '20px', 
-                backgroundColor: isConnected ? '#00D4AA20' : '#FF6B6B20',
-                color: isConnected ? '#00D4AA' : '#FF6B6B',
-                fontSize: '12px',
-                fontWeight: '600'
-              }}>
-                {isConnected ? 'CONNECTED' : 'DISCONNECTED'}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                {/* Connection status */}
+                <div style={{ 
+                  padding: '4px 12px', 
+                  borderRadius: '20px', 
+                  backgroundColor: isConnected ? '#00D4AA20' : '#FF6B6B20',
+                  color: isConnected ? '#00D4AA' : '#FF6B6B',
+                  fontSize: '12px',
+                  fontWeight: '600',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}>
+                  {isConnected ? <Wifi size={12} /> : <WifiOff size={12} />}
+                  {isConnected ? 'CONNECTED' : 'OFFLINE'}
+                </div>
               </div>
             </div>
+
+            {/* Mode-specific messaging */}
+            {effectiveBotStatus.mode === 'simulation' && !isConnected && (
+              <div style={{
+                padding: '12px',
+                borderRadius: '8px',
+                backgroundColor: '#4F46E520',
+                border: '1px solid #4F46E5',
+                marginBottom: '16px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                <Info size={16} style={{ color: '#4F46E5' }} />
+                <span style={{ color: '#4F46E5', fontSize: '14px' }}>
+                  Simulation mode: Showing mock opportunities for testing. No real trades will be executed.
+                </span>
+              </div>
+            )}
+
+            {effectiveBotStatus.mode === 'live' && !isConnected && (
+              <div style={{
+                padding: '12px',
+                borderRadius: '8px',
+                backgroundColor: '#FF6B6B20',
+                border: '1px solid #FF6B6B',
+                marginBottom: '16px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                <AlertCircle size={16} style={{ color: '#FF6B6B' }} />
+                <span style={{ color: '#FF6B6B', fontSize: '14px' }}>
+                  Live trading mode requires internet connection to fetch real market data.
+                </span>
+              </div>
+            )}
             
             {opportunities.length === 0 ? (
               <div style={{ 
@@ -266,7 +638,12 @@ const Home = ({
                 <BarChart3 size={48} style={{ margin: '0 auto 16px', opacity: 0.5 }} />
                 <p style={{ margin: 0, fontSize: '16px' }}>No opportunities found</p>
                 <p style={{ margin: '8px 0 0 0', fontSize: '14px' }}>
-                  {isConnected ? 'Scanning for arbitrage opportunities...' : 'Please check your connection'}
+                  {isConnected 
+                    ? `Scanning for ${effectiveBotStatus.mode === 'simulation' ? 'simulated' : 'real'} arbitrage opportunities...`
+                    : effectiveBotStatus.mode === 'simulation' 
+                      ? 'Simulation mode: Mock data will appear when bot is running'
+                      : 'Please check your internet connection'
+                  }
                 </p>
               </div>
             ) : (
@@ -283,48 +660,77 @@ const Home = ({
                     </tr>
                   </thead>
                   <tbody>
-                    {opportunities.slice(0, 10).map((opportunity) => (
-                      <tr key={opportunity.id} style={{ borderBottom: '1px solid #2D3748' }}>
-                        <td style={{ padding: '12px', fontWeight: '600', color: '#ffffff' }}>{opportunity.pair}</td>
-                        <td style={{ padding: '12px', color: '#9CA3AF' }}>{opportunity.buyDex}</td>
-                        <td style={{ padding: '12px', color: '#9CA3AF' }}>{opportunity.sellDex}</td>
-                        <td style={{ 
-                          padding: '12px', 
-                          textAlign: 'right', 
-                          fontWeight: '600',
-                          color: opportunity.profitPct >= 0 ? '#00D4AA' : '#FF6B6B'
-                        }}>
-                          {opportunity.profitPct.toFixed(2)}%
-                        </td>
-                        <td style={{ 
-                          padding: '12px', 
-                          textAlign: 'right', 
-                          fontWeight: '600',
-                          color: opportunity.profitUsd >= 0 ? '#00D4AA' : '#FF6B6B'
-                        }}>
-                          ${opportunity.profitUsd.toFixed(2)}
-                        </td>
-                        <td style={{ padding: '12px', textAlign: 'center' }}>
-                          <button
-                            onClick={() => onExecuteTrade(opportunity)}
-                            disabled={!isConnected || !status.isRunning}
-                            style={{
-                              padding: '6px 12px',
-                              borderRadius: '6px',
-                              border: 'none',
-                              backgroundColor: isConnected && status.isRunning ? '#00D4AA' : '#6B7280',
-                              color: '#ffffff',
-                              fontSize: '12px',
-                              fontWeight: '600',
-                              cursor: isConnected && status.isRunning ? 'pointer' : 'not-allowed',
-                              opacity: isConnected && status.isRunning ? 1 : 0.5
-                            }}
-                          >
-                            Execute
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                    {opportunities.slice(0, 10).map((opportunity) => {
+                      // Determine if execution is allowed
+                      const canExecute = effectiveBotStatus.mode === 'simulation' 
+                        ? effectiveBotStatus.isRunning  // Simulation: only need bot running
+                        : isConnected && effectiveBotStatus.isRunning  // Live: need connection + bot running
+                      
+                      return (
+                        <tr key={opportunity.id} style={{ borderBottom: '1px solid #2D3748' }}>
+                          <td style={{ padding: '12px', fontWeight: '600', color: '#ffffff' }}>
+                            {opportunity.pair}
+                            {effectiveBotStatus.mode === 'simulation' && (
+                              <span style={{ 
+                                marginLeft: '8px', 
+                                fontSize: '10px', 
+                                color: '#4F46E5',
+                                backgroundColor: '#4F46E520',
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                                fontWeight: '500'
+                              }}>
+                                SIM
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ padding: '12px', color: '#9CA3AF' }}>{opportunity.buyDex}</td>
+                          <td style={{ padding: '12px', color: '#9CA3AF' }}>{opportunity.sellDex}</td>
+                          <td style={{ 
+                            padding: '12px', 
+                            textAlign: 'right', 
+                            fontWeight: '600',
+                            color: opportunity.profitPct >= 0 ? '#00D4AA' : '#FF6B6B'
+                          }}>
+                            {opportunity.profitPct.toFixed(2)}%
+                          </td>
+                          <td style={{ 
+                            padding: '12px', 
+                            textAlign: 'right', 
+                            fontWeight: '600',
+                            color: opportunity.profitUsd >= 0 ? '#00D4AA' : '#FF6B6B'
+                          }}>
+                            ${opportunity.profitUsd.toFixed(2)}
+                          </td>
+                          <td style={{ padding: '12px', textAlign: 'center' }}>
+                            <button
+                              onClick={() => onExecuteTrade(opportunity)}
+                              disabled={!canExecute}
+                              style={{
+                                padding: '6px 12px',
+                                borderRadius: '6px',
+                                border: 'none',
+                                backgroundColor: canExecute ? '#00D4AA' : '#6B7280',
+                                color: '#ffffff',
+                                fontSize: '12px',
+                                fontWeight: '600',
+                                cursor: canExecute ? 'pointer' : 'not-allowed',
+                                opacity: canExecute ? 1 : 0.5
+                              }}
+                              title={
+                                !canExecute 
+                                  ? effectiveBotStatus.mode === 'live' 
+                                    ? 'Requires internet connection for live trading'
+                                    : 'Bot must be running to execute trades'
+                                  : `Execute ${effectiveBotStatus.mode === 'simulation' ? 'simulated' : 'live'} trade`
+                              }
+                            >
+                              {effectiveBotStatus.mode === 'simulation' ? 'Simulate' : 'Execute'}
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>

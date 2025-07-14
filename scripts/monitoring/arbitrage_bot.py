@@ -457,11 +457,6 @@ async def monitor_once_optimized(executor, dashboard):
         
         # Force immediate terminal output
         sys.stdout.flush()
-        sys.stderr.flush()
-        
-        # Also write to stderr for redundancy
-        sys.stderr.write(cycle_msg + "\n")
-        sys.stderr.flush()
         
         # Parallel price fetching
         all_prices = await get_all_prices_parallel()

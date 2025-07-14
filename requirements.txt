@@ -2,6 +2,8 @@
 web3==6.11.3
 aiohttp==3.9.1
 python-dotenv==1.0.0
+flask==3.0.0
+flask-socketio==5.3.6
 
 # Development dependencies
 pytest==7.4.3

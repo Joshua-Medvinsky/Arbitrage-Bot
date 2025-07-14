@@ -8,6 +8,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use serde_json::json;
+use std::fs;
+use std::path::PathBuf;
 
 // Shared state for the Python process
 #[derive(Debug, Clone)]
@@ -58,7 +60,7 @@ async fn start_python_backend(state: State<'_, PythonProcess>) -> Result<String,
     } else {
         // Fall back to Python script
         Command::new("python")
-            .arg("../websocket_server.py")
+            .arg("../socketio_server.py")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -214,6 +216,50 @@ async fn get_arbitrage_bot_status(state: State<'_, ArbitrageBot>) -> Result<bool
     Ok(process_guard.is_some())
 }
 
+#[tauri::command]
+async fn read_settings_file() -> Result<String, String> {
+    let env_path = get_env_file_path()?;
+    
+    match fs::read_to_string(&env_path) {
+        Ok(content) => Ok(content),
+        Err(e) => {
+            // If file doesn't exist, return empty string (will create default settings)
+            if e.kind() == std::io::ErrorKind::NotFound {
+                Ok(String::new())
+            } else {
+                Err(format!("Failed to read settings file: {}", e))
+            }
+        }
+    }
+}
+
+#[tauri::command]
+async fn write_settings_file(content: String) -> Result<(), String> {
+    let env_path = get_env_file_path()?;
+    
+    // Ensure parent directory exists
+    if let Some(parent) = env_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
+    
+    fs::write(&env_path, content).map_err(|e| format!("Failed to write settings file: {}", e))?;
+    Ok(())
+}
+
+fn get_env_file_path() -> Result<PathBuf, String> {
+    let current_dir = std::env::current_dir().map_err(|e| format!("Failed to get current directory: {}", e))?;
+    
+    let env_path = if current_dir.ends_with("src-tauri") {
+        // Running from frontend/src-tauri (development mode)
+        current_dir.parent().unwrap().parent().unwrap().join(".env")
+    } else {
+        // Running from project root or other location
+        current_dir.join(".env")
+    };
+    
+    Ok(env_path)
+}
+
 fn main() {
     // System tray menu
     let quit = CustomMenuItem::new("quit".to_string(), "Quit");
@@ -321,7 +367,9 @@ fn main() {
             get_backend_status,
             start_arbitrage_bot,
             stop_arbitrage_bot,
-            get_arbitrage_bot_status
+            get_arbitrage_bot_status,
+            read_settings_file,
+            write_settings_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

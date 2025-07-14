@@ -47,7 +47,7 @@
       ],
       "resources": [
         "../../arbitrage-bot-server.exe",
-        "../../websocket_server.py",
+        "../../socketio_server.py",
         "../../scripts/**/*",
         "../../config.py",
         "../../requirements.txt"
