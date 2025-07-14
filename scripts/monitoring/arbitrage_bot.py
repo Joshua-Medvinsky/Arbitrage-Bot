@@ -10,11 +10,88 @@ from collections import defaultdict, deque
 import threading
 import json
 
-# Configure UTF-8 encoding for Windows console output
-if sys.platform == "win32":
-    import codecs
-    sys.stdout = codecs.getwriter("utf-8")(sys.stdout.detach())
-    sys.stderr = codecs.getwriter("utf-8")(sys.stderr.detach())
+# Write to terminal and app
+def setup_dual_logging():
+    """Setup logging to write to both terminal and log file"""
+    # Create logs directory if it doesn't exist
+    log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'logs')
+    os.makedirs(log_dir, exist_ok=True)
+    
+    # Setup file for direct terminal output (separate from captured output)
+    terminal_log_file = os.path.join(log_dir, 'terminal_output.log')
+    
+    # Function to write to both terminal and log file
+    def dual_print(*args, **kwargs):
+        # Original print (may be captured by frontend)
+        original_print(*args, **kwargs)
+        
+        # Force write to terminal by opening a new console if on Windows
+        if sys.platform == "win32":
+            try:
+                # Try to write directly to console
+                import ctypes
+                from ctypes import wintypes
+                
+                # Get console handles
+                STD_OUTPUT_HANDLE = -11
+                STD_ERROR_HANDLE = -12
+                
+                h_stdout = ctypes.windll.kernel32.GetStdHandle(STD_OUTPUT_HANDLE)
+                if h_stdout and h_stdout != -1:
+                    message = ' '.join(str(arg) for arg in args) + '\n'
+                    message_bytes = message.encode('utf-8')
+                    bytes_written = wintypes.DWORD()
+                    ctypes.windll.kernel32.WriteConsoleA(
+                        h_stdout, message_bytes, len(message_bytes), 
+                        ctypes.byref(bytes_written), None
+                    )
+            except Exception:
+                pass
+        
+        # Also write to a dedicated terminal log file with timestamp
+        try:
+            with open(terminal_log_file, 'a', encoding='utf-8') as f:
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                message = ' '.join(str(arg) for arg in args)
+                f.write(f"[{timestamp}] {message}\n")
+                f.flush()
+        except Exception:
+            pass
+    
+    return dual_print
+
+# Store original print and setup dual logging
+original_print = print
+dual_print = setup_dual_logging()
+print = dual_print
+
+# Function to ensure terminal visibility
+def ensure_terminal_output(message):
+    """Ensure message appears in terminal even when run through frontend"""
+    print(message)  # This will use our dual_print function
+    
+    # Additional direct terminal writing for Windows
+    if sys.platform == "win32":
+        try:
+            # Allocate a new console if one doesn't exist
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            
+            # Try to allocate console (this may fail if console already exists)
+            try:
+                kernel32.AllocConsole()
+            except:
+                pass
+            
+            # Get the console window and make it visible
+            console_window = kernel32.GetConsoleWindow()
+            if console_window:
+                user32 = ctypes.windll.user32
+                # SW_SHOW = 5, SW_RESTORE = 9
+                user32.ShowWindow(console_window, 5)
+                
+        except Exception as e:
+            pass
 
 # Add project root to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -402,7 +479,16 @@ async def monitor_once_optimized(executor, dashboard):
     start_time = time.time()
     
     try:
-        print(f"\n🔄 Monitoring cycle #{dashboard.stats['loop_count'] + 1} started at {datetime.now().strftime('%H:%M:%S')}")
+        cycle_msg = f"\n🔄 Monitoring cycle #{dashboard.stats['loop_count'] + 1} started at {datetime.now().strftime('%H:%M:%S')}"
+        print(cycle_msg)
+        
+        # Force immediate terminal output
+        sys.stdout.flush()
+        sys.stderr.flush()
+        
+        # Also write to stderr for redundancy
+        sys.stderr.write(cycle_msg + "\n")
+        sys.stderr.flush()
         
         # Parallel price fetching
         all_prices = await get_all_prices_parallel()
@@ -480,17 +566,18 @@ async def monitor_continuously():
     executor = ArbitrageExecutor(PRIVATE_KEY)
     dashboard = MonitoringDashboard()
     
-    print(f"🚀 Starting continuous arbitrage monitoring...")
-    print(f"🔧 Execution Mode: {'LIVE' if EXECUTION_MODE else 'SIMULATION'}")
-    print(f"📊 Simulation Mode: {'ENABLED' if SIMULATION_MODE else 'DISABLED'}")
-    print(f"💰 Position Size: ${POSITION_SIZE_USD:,.0f}")
-    print(f"📊 Profit Range: {MIN_PROFIT_PCT}%-{MAX_PROFIT_PCT}%")
-    print(f"💧 Min Liquidity: ${MIN_LIQUIDITY_USD:,.0f}")
-    print(f"⏱️  Monitoring Interval: {MONITORING_INTERVAL_SECONDS}s")
-    print(f"📊 Dashboard Update: {DASHBOARD_UPDATE_INTERVAL}s")
-    print(f"🛡️  Safe Mode: {'ENABLED' if SAFE_MODE else 'DISABLED'}")
-    print(f"🚀 Flash Loan Enabled: {FLASH_LOAN_ENABLED}")
-    print("\nPress Ctrl+C to stop monitoring\n")
+    # Use enhanced terminal output for startup messages
+    ensure_terminal_output("🚀 Starting continuous arbitrage monitoring...")
+    ensure_terminal_output(f"🔧 Execution Mode: {'LIVE' if EXECUTION_MODE else 'SIMULATION'}")
+    ensure_terminal_output(f"📊 Simulation Mode: {'ENABLED' if SIMULATION_MODE else 'DISABLED'}")
+    ensure_terminal_output(f"💰 Position Size: ${POSITION_SIZE_USD:,.0f}")
+    ensure_terminal_output(f"📊 Profit Range: {MIN_PROFIT_PCT}%-{MAX_PROFIT_PCT}%")
+    ensure_terminal_output(f"💧 Min Liquidity: ${MIN_LIQUIDITY_USD:,.0f}")
+    ensure_terminal_output(f"⏱️  Monitoring Interval: {MONITORING_INTERVAL_SECONDS}s")
+    ensure_terminal_output(f"📊 Dashboard Update: {DASHBOARD_UPDATE_INTERVAL}s")
+    ensure_terminal_output(f"🛡️  Safe Mode: {'ENABLED' if SAFE_MODE else 'DISABLED'}")
+    ensure_terminal_output(f"🚀 Flash Loan Enabled: {FLASH_LOAN_ENABLED}")
+    ensure_terminal_output("\nPress Ctrl+C to stop monitoring\n")
     
     # Start dashboard thread
     dashboard.start_dashboard_thread()
