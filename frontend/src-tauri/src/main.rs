@@ -110,16 +110,38 @@ async fn start_arbitrage_bot(state: State<'_, ArbitrageBot>, app_handle: tauri::
         current_dir.join("scripts/monitoring/arbitrage_bot.py")
     };
     
-    let mut child = Command::new("python")
+    // Check if script file exists
+    if !script_path.exists() {
+        return Err(format!("Arbitrage bot script not found at: {:?}", script_path));
+    }
+    
+    // Try to find the right Python command for the platform
+    let python_cmd = if cfg!(target_os = "windows") {
+        "python"
+    } else {
+        // On macOS and Linux, try python3 first, then python
+        if Command::new("python3").arg("--version").output().is_ok() {
+            "python3"
+        } else {
+            "python"
+        }
+    };
+    
+    // Test if Python command works before starting the script
+    if Command::new(python_cmd).arg("--version").output().is_err() {
+        return Err(format!("Python command '{}' not found. Please ensure Python is installed and available in PATH.", python_cmd));
+    }
+    
+    let mut child = Command::new(python_cmd)
         .arg("-u") // Force unbuffered stdout/stderr
         .arg(&script_path)
         .env("PYTHONIOENCODING", "utf-8") // Set UTF-8 encoding for Python
         .stdout(Stdio::piped())
-        .stderr(Stdio::null()) // Completely ignore stderr to test for duplicates
+        .stderr(Stdio::piped()) // Capture stderr to get error details
         .spawn()
-        .map_err(|e| format!("Failed to start arbitrage bot at {:?}: {}", script_path, e))?;
+        .map_err(|e| format!("Failed to start arbitrage bot with {} at {:?}: {}", python_cmd, script_path, e))?;
 
-    // Capture ONLY stdout for logging
+    // Capture BOTH stdout and stderr for logging and error handling
     if let Some(stdout) = child.stdout.take() {
         let app_handle_clone = app_handle.clone();
         thread::spawn(move || {
@@ -135,6 +157,30 @@ async fn start_arbitrage_bot(state: State<'_, ArbitrageBot>, app_handle: tauri::
                             let _ = window.emit("bot-log", json!({
                                 "level": "info",
                                 "message": cleaned_line,
+                                "timestamp": chrono::Utc::now().timestamp_millis(),
+                                "source": "arbitrage_bot.py"
+                            }));
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    if let Some(stderr) = child.stderr.take() {
+        let app_handle_clone = app_handle.clone();
+        thread::spawn(move || {
+            use std::io::{BufRead, BufReader};
+            let reader = BufReader::new(stderr);
+            for line in reader.lines() {
+                if let Ok(line) = line {
+                    let cleaned_line = line.trim();
+                    if !cleaned_line.is_empty() {
+                        // Send error logs to frontend
+                        if let Some(window) = app_handle_clone.get_window("main") {
+                            let _ = window.emit("bot-log", json!({
+                                "level": "error",
+                                "message": format!("ERROR: {}", cleaned_line),
                                 "timestamp": chrono::Utc::now().timestamp_millis(),
                                 "source": "arbitrage_bot.py"
                             }));
