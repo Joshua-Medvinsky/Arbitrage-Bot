@@ -22,9 +22,9 @@ ENABLE_AERODROME = os.getenv("ENABLE_AERODROME", "true").lower() == "true"
 ENABLE_BALANCER_V2 = os.getenv("ENABLE_BALANCER_V2", "false").lower() == "true"  # Disabled by default due to slow performance
 
 # DEX Performance Settings
-UNISWAP_MAX_POOLS = int(os.getenv("UNISWAP_MAX_POOLS", "1000"))  # Limit pools for performance
-SUSHISWAP_MAX_PAIRS = int(os.getenv("SUSHISWAP_MAX_PAIRS", "1000"))  # Limit pairs for performance
-AERODROME_MAX_POOLS = int(os.getenv("AERODROME_MAX_POOLS", "1000"))  # Limit pools for performance
+UNISWAP_MAX_POOLS = int(os.getenv("UNISWAP_MAX_POOLS", "5000"))  # Limit pools for performance
+SUSHISWAP_MAX_PAIRS = int(os.getenv("SUSHISWAP_MAX_PAIRS", "5000"))  # Limit pairs for performance
+AERODROME_MAX_POOLS = int(os.getenv("AERODROME_MAX_POOLS", "5000"))  # Limit pools for performance
 BALANCER_MAX_POOLS = int(os.getenv("BALANCER_MAX_POOLS", "50"))  # Very limited due to slow performance
 
 # Contract Addresses (Base Network)

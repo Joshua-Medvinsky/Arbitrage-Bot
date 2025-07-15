@@ -441,8 +441,7 @@ async def monitor_once_optimized(executor, dashboard):
                 analysis = opp['profit_analysis']
                 strategy = opp.get('strategy', 'regular')
                 print(f"{i+1}. {opp['pair']} ({strategy.upper()})")
-                print(f"   Buy on {opp['buy_dex']} @ {opp['buy_price']:.6f}")
-                print(f"   Sell on {opp['sell_dex']} @ {opp['sell_price']:.6f}")
+                print(f"   Buy on {opp['buy_dex']} @ {opp['buy_price']:.6f} | Sell on {opp['sell_dex']} @ {opp['sell_price']:.6f}")
                 print(f"   Profit: {opp['profit_pct']:.2f}%")
                 print(f"   Net Profit: ${analysis.get('net_profit_usd', 0):.2f}")
                 print(f"   Net Profit %: {analysis.get('net_profit_pct', 0):.2f}%")
