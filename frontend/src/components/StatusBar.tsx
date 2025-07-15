@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { BotStatus } from '../App'
 import { 
   Wifi, 
@@ -14,10 +15,24 @@ import {
 
 interface StatusBarProps {
   status: BotStatus
-  isConnected: boolean
 }
 
-const StatusBar = ({ status, isConnected }: StatusBarProps) => {
+const StatusBar = ({ status }: StatusBarProps) => {
+  const [isOnline, setIsOnline] = useState(navigator.onLine)
+
+  // Monitor internet connectivity
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true)
+    const handleOffline = () => setIsOnline(false)
+
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [])
   const containerStyle = {
     width: '100%',
     padding: '16px 32px', // Consistent edge padding
@@ -67,22 +82,22 @@ const StatusBar = ({ status, isConnected }: StatusBarProps) => {
     <div style={containerStyle}>
       {/* Left Section - Connection & Bot Status */}
       <div style={sectionWrapperStyle}>
-        {/* Connection Status */}
+        {/* Internet Connection Status */}
         <div style={statusItemStyle}>
           <div style={{ 
-            backgroundColor: isConnected ? '#00D4AA20' : '#EF444420', 
+            backgroundColor: isOnline ? '#00D4AA20' : '#EF444420', 
             borderRadius: '6px', 
             padding: '4px',
-            color: isConnected ? '#00D4AA' : '#EF4444'
+            color: isOnline ? '#00D4AA' : '#EF4444'
           }}>
-            {isConnected ? <Wifi size={14} /> : <WifiOff size={14} />}
+            {isOnline ? <Wifi size={14} /> : <WifiOff size={14} />}
           </div>
           <span style={{ 
             fontSize: '13px', 
             fontWeight: '600', 
-            color: isConnected ? '#00D4AA' : '#EF4444' 
+            color: isOnline ? '#00D4AA' : '#EF4444' 
           }}>
-            {isConnected ? 'Connected' : 'Disconnected'}
+            {isOnline ? 'Online' : 'Offline'}
           </span>
         </div>
 

@@ -1,7 +1,7 @@
 import { ArbitrageOpportunity, BotStatus, Portfolio, LogEntry } from '../App'
 import { TrendingUp, Activity, DollarSign, Target, Shield, Play, Square, BarChart3, Clock, Users, ScrollText, AlertCircle, CheckCircle, Info, XCircle, Wifi, WifiOff } from 'lucide-react'
 import { useState, useEffect } from 'react'
-import { getBotStatus, startBotLocal, stopBotLocal, toggleTradingMode, toggleSafeMode, type LocalBotState } from '../utils/botControl'
+import { getBotStatus, startBotLocal, stopBotLocal, toggleSafeMode, type LocalBotState } from '../utils/botControl'
 
 interface HomeProps {
   opportunities: ArbitrageOpportunity[]
@@ -31,6 +31,7 @@ const Home = ({
   onExecuteTrade
 }: HomeProps) => {
   const [localBotState, setLocalBotState] = useState<LocalBotState | null>(null)
+  const [isOnline, setIsOnline] = useState(navigator.onLine)
 
   // Load local bot state on component mount
   useEffect(() => {
@@ -56,6 +57,35 @@ const Home = ({
     loadLocalState()
   }, [])
 
+  // Sync localBotState with App's status prop changes (especially mode changes)
+  useEffect(() => {
+    if (localBotState && status) {
+      // Update localBotState when App's status changes, especially mode changes
+      const updatedState = {
+        ...localBotState,
+        mode: status.mode, // Sync mode from App
+        safeMode: status.safeMode, // Sync safe mode from App
+        // Keep local running state and session data unchanged
+      }
+      setLocalBotState(updatedState)
+      console.log('Synced localBotState with App status:', updatedState)
+    }
+  }, [status.mode, status.safeMode]) // Only sync when mode or safeMode changes
+
+  // Monitor internet connectivity
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true)
+    const handleOffline = () => setIsOnline(false)
+
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [])
+
   // Debug: Log server status changes
   useEffect(() => {
     console.log('Server status prop changed:', {
@@ -68,9 +98,9 @@ const Home = ({
 
   // Handle connection loss in live mode - auto-stop bot
   useEffect(() => {
-    if (localBotState && localBotState.mode === 'live' && !isConnected && localBotState.isRunning) {
-      // Connection lost while bot was running in live mode - stop the bot
-      console.log('Connection lost in live mode - stopping bot automatically')
+    if (localBotState && !isOnline && localBotState.isRunning) {
+      // Internet connection lost while bot was running - stop the bot for both modes
+      console.log('Internet connection lost - stopping bot automatically (both simulation and live modes require real market data)')
       const stopBotDueToConnectionLoss = async () => {
         try {
           // Stop the bot locally first to update UI immediately
@@ -80,23 +110,23 @@ const Home = ({
           // Try to stop the bot via Tauri if possible
           try {
             await stopBotLocal()
-            console.log('Bot successfully stopped due to connection loss in live mode')
+            console.log('Bot successfully stopped due to internet connection loss')
           } catch (taruiError) {
             console.warn('Could not stop bot via Tauri, but local state updated:', taruiError)
           }
         } catch (error) {
-          console.error('Failed to handle connection loss:', error)
+          console.error('Failed to handle internet connection loss:', error)
         }
       }
       stopBotDueToConnectionLoss()
     }
-  }, [isConnected, localBotState?.mode, localBotState?.isRunning, localBotState])
+  }, [isOnline, localBotState?.mode, localBotState?.isRunning, localBotState])
 
   // Update local state when connection status changes (for re-rendering)
   useEffect(() => {
-    // This effect is just to trigger re-renders when connection status changes
+    // This effect is just to trigger re-renders when internet connectivity changes
     // The actual logic is handled in the component functions
-  }, [isConnected, localBotState?.mode])
+  }, [isOnline, localBotState?.mode])
 
   // Sync local state with server when connection is restored
   useEffect(() => {
@@ -151,8 +181,8 @@ const Home = ({
       // Use local state when available
       let effectiveIsRunning = localBotState.isRunning
       
-      // In live mode without connection, bot cannot be running
-      if (localBotState.mode === 'live' && !isConnected) {
+      // Both simulation and live modes require internet connection for real market data
+      if (!isOnline) {
         effectiveIsRunning = false
       }
       
@@ -171,28 +201,29 @@ const Home = ({
   const canControlBot = (() => {
     if (!localBotState) return false // Can't control if we don't know the state
     
-    if (localBotState.mode === 'simulation') {
-      // Simulation mode: always allow controls (offline capable)
-      return true
-    } else {
-      // Live mode: require connection for bot controls
-      return isConnected
-    }
+    // Both simulation and live modes require internet connection for real market data
+    return isOnline
   })()
 
   // Handle bot start with mode awareness
   const handleStart = async () => {
     if (!localBotState) return
     
+    if (!isOnline) {
+      // Both modes require internet connection for real market data
+      console.warn('Cannot start bot without internet connection - both simulation and live modes require real market data')
+      return
+    }
+    
     if (localBotState.mode === 'simulation') {
-      // Simulation mode: always use local control
+      // Simulation mode: use local control (real data, no actual trades)
       const result = await startBotLocal()
       if (result.success) {
         const updatedState = { ...localBotState, isRunning: true, lastStartTime: Date.now() }
         setLocalBotState(updatedState)
       }
-    } else if (localBotState.mode === 'live' && isConnected) {
-      // Live mode: use server control when connected, but also update local state optimistically
+    } else if (localBotState.mode === 'live') {
+      // Live mode: use server control when online, but also update local state optimistically
       try {
         // Optimistically update local state for immediate UI feedback
         const optimisticState = { ...localBotState, isRunning: true, lastStartTime: Date.now() }
@@ -207,10 +238,6 @@ const Home = ({
         // Revert optimistic update on error
         setLocalBotState(localBotState)
       }
-    } else if (localBotState.mode === 'live' && !isConnected) {
-      // Live mode when offline: show error message
-      console.warn('Cannot start bot in live mode without internet connection')
-      // Could add a toast notification here in the future
     }
   }
 
@@ -225,8 +252,8 @@ const Home = ({
         const updatedState = { ...localBotState, isRunning: false }
         setLocalBotState(updatedState)
       }
-    } else if (isConnected) {
-      // Live mode: use server control when connected, but also update local state optimistically
+    } else if (isOnline) {
+      // Live mode: use server control when online, but also update local state optimistically
       try {
         // Optimistically update local state for immediate UI feedback
         const optimisticState = { ...localBotState, isRunning: false }
@@ -242,40 +269,9 @@ const Home = ({
         setLocalBotState(localBotState)
       }
     } else {
-      // Live mode when offline: force stop locally (shouldn't be running anyway)
+      // When offline: force stop locally for both modes
       const updatedState = { ...localBotState, isRunning: false }
       setLocalBotState(updatedState)
-    }
-  }
-
-  // Handle mode toggle with mode awareness
-  const handleToggleMode = async () => {
-    if (!localBotState) return
-    
-    if (!isConnected) {
-      // When offline: always use local control
-      const result = await toggleTradingMode()
-      if (result.success) {
-        const updatedState = { ...localBotState, mode: result.newMode }
-        setLocalBotState(updatedState)
-      }
-    } else {
-      // When connected: use local control first, then notify server
-      try {
-        // Update local state first (this updates .env file)
-        const result = await toggleTradingMode()
-        if (result.success) {
-          const updatedState = { ...localBotState, mode: result.newMode }
-          setLocalBotState(updatedState)
-          
-          // Then notify server of the change
-          onToggleMode()
-          
-          console.log('Mode toggle completed:', result.newMode)
-        }
-      } catch (error) {
-        console.error('Failed to toggle mode:', error)
-      }
     }
   }
 
@@ -283,7 +279,7 @@ const Home = ({
   const handleToggleSafeMode = async () => {
     if (!localBotState) return
     
-    if (!isConnected) {
+    if (!isOnline) {
       // When offline: always use local control
       const result = await toggleSafeMode()
       if (result.success) {
@@ -291,7 +287,7 @@ const Home = ({
         setLocalBotState(updatedState)
       }
     } else {
-      // When connected: use local control first, then notify server
+      // When online: use local control first, then notify server
       try {
         // Update local state first (this updates .env file)
         const result = await toggleSafeMode()
@@ -467,8 +463,8 @@ const Home = ({
               </div>
             </div>
 
-            {/* Connection status warning for live mode */}
-            {effectiveBotStatus.mode === 'live' && !isConnected && (
+            {/* Connection status warning for both modes */}
+            {!isOnline && (
               <div style={{
                 padding: '12px',
                 borderRadius: '8px',
@@ -482,15 +478,15 @@ const Home = ({
                 <WifiOff size={16} style={{ color: '#FF6B6B' }} />
                 <span style={{ color: '#FF6B6B', fontSize: '14px', fontWeight: '500' }}>
                   {localBotState?.isRunning ? 
-                    'Connection lost - bot automatically stopped. Live trading requires internet connection.' :
-                    'Live trading requires internet connection. Bot controls disabled until reconnected.'
+                    'Internet connection lost - bot automatically stopped. Both simulation and live modes require real market data.' :
+                    'Internet connection required. Both simulation and live modes need real market data to operate.'
                   }
                 </span>
               </div>
             )}
 
-            {/* Simulation mode indicator - shown for both online and offline */}
-            {effectiveBotStatus.mode === 'simulation' && (
+            {/* Simulation mode indicator - shown when online */}
+            {effectiveBotStatus.mode === 'simulation' && isOnline && (
               <div style={{
                 padding: '12px',
                 borderRadius: '8px',
@@ -503,7 +499,7 @@ const Home = ({
               }}>
                 <Shield size={16} style={{ color: '#4F46E5' }} />
                 <span style={{ color: '#4F46E5', fontSize: '14px', fontWeight: '500' }}>
-                  Simulation mode: Safe testing environment with mock data. No real money at risk.
+                  Simulation mode: Uses real market data but no actual trades executed. Safe testing environment.
                 </span>
               </div>
             )}
@@ -530,17 +526,24 @@ const Home = ({
                 {effectiveBotStatus.isRunning ? 'Stop Bot' : 'Start Bot'}
               </button>
               
+              {/* Mode Toggle Button */}
               <button
-                onClick={handleToggleMode}
-                disabled={effectiveBotStatus.isRunning || (!isConnected && effectiveBotStatus.mode === 'live')}
+                onClick={onToggleMode}
+                disabled={effectiveBotStatus.isRunning}
                 style={{
                   ...buttonStyle,
-                  backgroundColor: effectiveBotStatus.mode === 'simulation' ? '#4F46E5' : '#F59E0B',
+                  backgroundColor: effectiveBotStatus.isRunning ? '#6B7280' : 
+                    (effectiveBotStatus.mode === 'simulation' ? '#4F46E5' : '#F59E0B'),
                   color: '#ffffff',
-                  opacity: (effectiveBotStatus.isRunning || (!isConnected && effectiveBotStatus.mode === 'live')) ? 0.5 : 1,
-                  cursor: (effectiveBotStatus.isRunning || (!isConnected && effectiveBotStatus.mode === 'live')) ? 'not-allowed' : 'pointer'
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  justifyContent: 'center',
+                  opacity: effectiveBotStatus.isRunning ? 0.5 : 1,
+                  cursor: effectiveBotStatus.isRunning ? 'not-allowed' : 'pointer'
                 }}
               >
+                <Activity size={16} />
                 {effectiveBotStatus.mode === 'simulation' ? 'Simulation Mode' : 'Live Trading'}
               </button>
               
@@ -574,44 +577,26 @@ const Home = ({
                 {effectiveBotStatus.mode === 'simulation' ? 'Simulated' : 'Live'} Arbitrage Opportunities
               </h3>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                {/* Connection status */}
+                {/* Internet connection status */}
                 <div style={{ 
                   padding: '4px 12px', 
                   borderRadius: '20px', 
-                  backgroundColor: isConnected ? '#00D4AA20' : '#FF6B6B20',
-                  color: isConnected ? '#00D4AA' : '#FF6B6B',
+                  backgroundColor: isOnline ? '#00D4AA20' : '#FF6B6B20',
+                  color: isOnline ? '#00D4AA' : '#FF6B6B',
                   fontSize: '12px',
                   fontWeight: '600',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px'
                 }}>
-                  {isConnected ? <Wifi size={12} /> : <WifiOff size={12} />}
-                  {isConnected ? 'CONNECTED' : 'OFFLINE'}
+                  {isOnline ? <Wifi size={12} /> : <WifiOff size={12} />}
+                  {isOnline ? 'ONLINE' : 'OFFLINE'}
                 </div>
               </div>
             </div>
 
             {/* Mode-specific messaging */}
-            {effectiveBotStatus.mode === 'simulation' && !isConnected && (
-              <div style={{
-                padding: '12px',
-                borderRadius: '8px',
-                backgroundColor: '#4F46E520',
-                border: '1px solid #4F46E5',
-                marginBottom: '16px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}>
-                <Info size={16} style={{ color: '#4F46E5' }} />
-                <span style={{ color: '#4F46E5', fontSize: '14px' }}>
-                  Simulation mode: Showing mock opportunities for testing. No real trades will be executed.
-                </span>
-              </div>
-            )}
-
-            {effectiveBotStatus.mode === 'live' && !isConnected && (
+            {!isOnline && (
               <div style={{
                 padding: '12px',
                 borderRadius: '8px',
@@ -624,7 +609,7 @@ const Home = ({
               }}>
                 <AlertCircle size={16} style={{ color: '#FF6B6B' }} />
                 <span style={{ color: '#FF6B6B', fontSize: '14px' }}>
-                  Live trading mode requires internet connection to fetch real market data.
+                  Internet connection required. Both simulation and live modes need real market data to function.
                 </span>
               </div>
             )}
@@ -638,11 +623,9 @@ const Home = ({
                 <BarChart3 size={48} style={{ margin: '0 auto 16px', opacity: 0.5 }} />
                 <p style={{ margin: 0, fontSize: '16px' }}>No opportunities found</p>
                 <p style={{ margin: '8px 0 0 0', fontSize: '14px' }}>
-                  {isConnected 
-                    ? `Scanning for ${effectiveBotStatus.mode === 'simulation' ? 'simulated' : 'real'} arbitrage opportunities...`
-                    : effectiveBotStatus.mode === 'simulation' 
-                      ? 'Simulation mode: Mock data will appear when bot is running'
-                      : 'Please check your internet connection'
+                  {isOnline 
+                    ? `Scanning for real ${effectiveBotStatus.mode === 'simulation' ? 'market data (simulation mode)' : 'arbitrage opportunities (live mode)'}...`
+                    : 'Internet connection required for both simulation and live modes to access real market data'
                   }
                 </p>
               </div>
@@ -662,9 +645,7 @@ const Home = ({
                   <tbody>
                     {opportunities.slice(0, 10).map((opportunity) => {
                       // Determine if execution is allowed
-                      const canExecute = effectiveBotStatus.mode === 'simulation' 
-                        ? effectiveBotStatus.isRunning  // Simulation: only need bot running
-                        : isConnected && effectiveBotStatus.isRunning  // Live: need connection + bot running
+                      const canExecute = effectiveBotStatus.isRunning && isOnline  // Both modes need internet + bot running
                       
                       return (
                         <tr key={opportunity.id} style={{ borderBottom: '1px solid #2D3748' }}>
@@ -719,8 +700,8 @@ const Home = ({
                               }}
                               title={
                                 !canExecute 
-                                  ? effectiveBotStatus.mode === 'live' 
-                                    ? 'Requires internet connection for live trading'
+                                  ? !isOnline 
+                                    ? 'Requires internet connection for real market data'
                                     : 'Bot must be running to execute trades'
                                   : `Execute ${effectiveBotStatus.mode === 'simulation' ? 'simulated' : 'live'} trade`
                               }

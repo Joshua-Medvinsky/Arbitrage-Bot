@@ -6,6 +6,7 @@ import Info from './components/Info'
 import StatusBar from './components/StatusBar'
 import { io, Socket } from 'socket.io-client'
 import { showNotification, startArbitrageBot, stopArbitrageBot } from './utils/platform'
+import { loadSettings } from './utils/settings'
 
 // Lazy load the invoke function to speed up initial load
 let invokeModule: any = null
@@ -96,6 +97,42 @@ function App() {
     ]
   })
   const [logs, setLogs] = useState<LogEntry[]>([])
+
+  // Handle mode changes from any component (Home or Settings)
+  const handleModeChange = async (simulationMode: boolean) => {
+    const newMode = simulationMode ? 'simulation' : 'live'
+    setBotStatus(prev => ({ ...prev, mode: newMode }))
+    
+    // Save to local settings file immediately
+    try {
+      const { saveSettingsWithServerSync, loadSettings } = await import('./utils/settings')
+      const currentSettings = await loadSettings()
+      const updatedSettings = {
+        ...currentSettings,
+        SIMULATION_MODE: simulationMode,
+        EXECUTION_MODE: !simulationMode
+      }
+      await saveSettingsWithServerSync(updatedSettings, socket)
+      console.log('Mode changed and saved:', newMode)
+    } catch (error) {
+      console.error('Failed to save mode change:', error)
+    }
+  }
+
+  // Load initial mode from local settings
+  useEffect(() => {
+    const loadInitialMode = async () => {
+      try {
+        const settings = await loadSettings()
+        const initialMode = settings.SIMULATION_MODE ? 'simulation' : 'live'
+        setBotStatus(prev => ({ ...prev, mode: initialMode }))
+      } catch (error) {
+        console.error('Failed to load initial mode from settings:', error)
+        // Keep default 'simulation' mode if loading fails
+      }
+    }
+    loadInitialMode()
+  }, [])
 
   // Listen for bot logs from Tauri events
   useEffect(() => {
@@ -272,11 +309,9 @@ function App() {
     }
   }
 
-  const handleToggleMode = () => {
-    if (socket) {
-      const newMode = botStatus.mode === 'simulation' ? 'live' : 'simulation'
-      socket.emit('toggle_mode', newMode)
-    }
+  const handleToggleMode = async () => {
+    const newSimulationMode = botStatus.mode !== 'simulation'
+    await handleModeChange(newSimulationMode)
   }
 
   const handleToggleSafeMode = () => {
@@ -304,7 +339,7 @@ function App() {
           />
         )
       case 'settings':
-        return <Settings socket={socket} />
+        return <Settings socket={socket} currentMode={botStatus.mode} onModeChange={handleModeChange} />
       case 'info':
         return <Info />
       default:
@@ -491,8 +526,7 @@ function App() {
           overflow: 'visible' // Ensure content doesn't get clipped
         }}>
           <StatusBar 
-            status={botStatus} 
-            isConnected={isConnected}
+            status={botStatus}
           />
         </div>
         

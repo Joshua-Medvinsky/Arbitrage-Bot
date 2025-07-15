@@ -33,9 +33,11 @@ interface SettingsData {
 
 interface SettingsProps {
   socket: any
+  currentMode?: 'simulation' | 'live'
+  onModeChange?: (simulationMode: boolean) => Promise<void>
 }
 
-const Settings = ({ socket }: SettingsProps) => {
+const Settings = ({ socket, currentMode, onModeChange }: SettingsProps) => {
   const [settings, setSettings] = useState<SettingsData>({
     SIMULATION_MODE: true,
     FLASH_LOAN_ENABLED: false,
@@ -79,6 +81,7 @@ const Settings = ({ socket }: SettingsProps) => {
         const localSettings = await loadSettings()
         console.log('Loaded local settings:', localSettings)
         setSettings(localSettings)
+        // Don't need to notify App component since App is now the source of truth
       } catch (error) {
         console.error('Failed to load local settings:', error)
       }
@@ -95,6 +98,7 @@ const Settings = ({ socket }: SettingsProps) => {
         console.log('Received settings data from server:', data)
         // Server settings take precedence over local (in case of discrepancies)
         setSettings(data)
+        // Don't need to notify App component since App is now the source of truth
       })
 
       // Add handler for save confirmation
@@ -116,6 +120,18 @@ const Settings = ({ socket }: SettingsProps) => {
     }
   }, [socket])
 
+  // Sync Settings component mode with App component mode
+  useEffect(() => {
+    if (currentMode !== undefined) {
+      const isSimulation = currentMode === 'simulation'
+      setSettings(prev => ({
+        ...prev,
+        SIMULATION_MODE: isSimulation,
+        EXECUTION_MODE: !isSimulation
+      }))
+    }
+  }, [currentMode])
+
   // Internet connectivity monitoring
   useEffect(() => {
     const handleOnline = () => setIsOnline(true)
@@ -130,12 +146,24 @@ const Settings = ({ socket }: SettingsProps) => {
     }
   }, [])
 
-  const handleInputChange = (key: keyof SettingsData, value: any) => {
+  const handleInputChange = async (key: keyof SettingsData, value: any) => {
     setSettings(prev => ({
       ...prev,
       [key]: value
     }))
-    setHasChanges(true)
+    
+    // Handle mode changes immediately through App component
+    if (key === 'SIMULATION_MODE' && onModeChange) {
+      await onModeChange(value as boolean)
+      // Don't set hasChanges for mode changes since App handles saving
+    } else if (key === 'EXECUTION_MODE' && onModeChange) {
+      // When EXECUTION_MODE is true, SIMULATION_MODE should be false
+      await onModeChange(!(value as boolean))
+      // Don't set hasChanges for mode changes since App handles saving
+    } else {
+      // For non-mode changes, mark as having changes
+      setHasChanges(true)
+    }
   }
 
   const handleSaveSettings = async () => {
@@ -439,7 +467,7 @@ const Settings = ({ socket }: SettingsProps) => {
             borderRadius: '50%',
             backgroundColor: isOnline ? '#10B981' : '#9CA3AF'
           }} />
-          {isOnline ? 'Online - Ready for Live Trading' : 'Offline - Simulation Only'}
+          {isOnline ? 'Online' : 'Offline'}
         </div>
 
         <div style={{ display: 'flex', gap: '12px' }}>
