@@ -1,4 +1,7 @@
 # PowerShell Build Script for Arbitrage Bot
+# ⚠️  WARNING: This build script is OUTDATED and references old websocket_server.py
+# ⚠️  It needs to be updated to use socketio_server.py before use
+# ⚠️  TODO: Update all references from websocket_server.py to socketio_server.py
 # This script builds a complete standalone Tauri application
 # The result is a Windows installer that contains everything needed to run the bot
 

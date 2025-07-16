@@ -13,6 +13,7 @@ import {
   Gauge,
   Lock
 } from 'lucide-react'
+import { loadSettings, saveSettingsWithServerSync } from '../utils/settings'
 
 interface SettingsData {
   SIMULATION_MODE: boolean
@@ -32,9 +33,11 @@ interface SettingsData {
 
 interface SettingsProps {
   socket: any
+  currentMode?: 'simulation' | 'live'
+  onModeChange?: (simulationMode: boolean) => Promise<void>
 }
 
-const Settings = ({ socket }: SettingsProps) => {
+const Settings = ({ socket, currentMode, onModeChange }: SettingsProps) => {
   const [settings, setSettings] = useState<SettingsData>({
     SIMULATION_MODE: true,
     FLASH_LOAN_ENABLED: false,
@@ -53,6 +56,7 @@ const Settings = ({ socket }: SettingsProps) => {
 
   const [hasChanges, setHasChanges] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [isOnline, setIsOnline] = useState(navigator.onLine)
 
   const cardStyle = {
     backgroundColor: '#1A1F2E',
@@ -70,51 +74,133 @@ const Settings = ({ socket }: SettingsProps) => {
   }
 
   useEffect(() => {
-    // Request current settings from server
+    // Load settings from local file first
+    const loadLocalSettings = async () => {
+      try {
+        console.log('Loading settings from local file...')
+        const localSettings = await loadSettings()
+        console.log('Loaded local settings:', localSettings)
+        setSettings(localSettings)
+        // Don't need to notify App component since App is now the source of truth
+      } catch (error) {
+        console.error('Failed to load local settings:', error)
+      }
+    }
+
+    loadLocalSettings()
+
+    // Also request current settings from server if available
     if (socket) {
+      console.log('Requesting settings from server...')
       socket.emit('get_settings')
       
       socket.on('settings_data', (data: SettingsData) => {
+        console.log('Received settings data from server:', data)
+        // Server settings take precedence over local (in case of discrepancies)
         setSettings(data)
+        // Don't need to notify App component since App is now the source of truth
+      })
+
+      // Add handler for save confirmation
+      socket.on('settings_updated', (response: { success: boolean; message: string; settings?: SettingsData }) => {
+        console.log('Received settings_updated response from server:', response)
+        if (response.success && response.settings) {
+          console.log('Server confirmed settings update')
+        } else if (!response.success) {
+          console.error('Server failed to save settings:', response.message)
+        }
       })
     }
 
     return () => {
       if (socket) {
         socket.off('settings_data')
+        socket.off('settings_updated')
       }
     }
   }, [socket])
 
-  const handleInputChange = (key: keyof SettingsData, value: any) => {
+  // Sync Settings component mode with App component mode
+  useEffect(() => {
+    if (currentMode !== undefined) {
+      const isSimulation = currentMode === 'simulation'
+      setSettings(prev => ({
+        ...prev,
+        SIMULATION_MODE: isSimulation,
+        EXECUTION_MODE: !isSimulation
+      }))
+    }
+  }, [currentMode])
+
+  // Internet connectivity monitoring
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true)
+    const handleOffline = () => setIsOnline(false)
+    
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [])
+
+  const handleInputChange = async (key: keyof SettingsData, value: any) => {
     setSettings(prev => ({
       ...prev,
       [key]: value
     }))
-    setHasChanges(true)
+    
+    // Handle mode changes immediately through App component
+    if (key === 'SIMULATION_MODE' && onModeChange) {
+      await onModeChange(value as boolean)
+      // Don't set hasChanges for mode changes since App handles saving
+    } else if (key === 'EXECUTION_MODE' && onModeChange) {
+      // When EXECUTION_MODE is true, SIMULATION_MODE should be false
+      await onModeChange(!(value as boolean))
+      // Don't set hasChanges for mode changes since App handles saving
+    } else {
+      // For non-mode changes, mark as having changes
+      setHasChanges(true)
+    }
   }
 
   const handleSaveSettings = async () => {
-    if (!socket) return
-    
+    console.log('Saving settings:', settings)
     setIsSaving(true)
+    
     try {
-      socket.emit('update_settings', settings)
-      setHasChanges(false)
-      // Show success notification
-      setTimeout(() => setIsSaving(false), 1000)
+      // Use local-first save approach
+      const result = await saveSettingsWithServerSync(settings, socket)
+      
+      setIsSaving(false)
+      if (result.success) {
+        setHasChanges(false)
+        console.log('Settings saved successfully:', result.message)
+      } else {
+        console.error('Failed to save settings:', result.message)
+      }
     } catch (error) {
       console.error('Failed to save settings:', error)
       setIsSaving(false)
     }
   }
 
-  const handleResetSettings = () => {
-    // Request fresh settings from server
-    if (socket) {
-      socket.emit('get_settings')
+  const handleResetSettings = async () => {
+    try {
+      console.log('Resetting settings to saved values...')
+      const savedSettings = await loadSettings()
+      setSettings(savedSettings)
+      setHasChanges(false)
+      console.log('Settings reset successfully')
+    } catch (error) {
+      console.error('Failed to reset settings:', error)
+      // Fallback: request from server if local load fails
+      if (socket) {
+        socket.emit('get_settings')
+      }
     }
-    setHasChanges(false)
   }
 
   const ToggleSwitch = ({ 
@@ -226,82 +312,126 @@ const Settings = ({ socket }: SettingsProps) => {
     unit?: string
     icon?: React.ReactNode
     color?: string
-  }) => (
-    <div style={smallCardStyle}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px', marginBottom: '16px' }}>
-        {icon && (
-          <div style={{ 
-            backgroundColor: `${color}20`, 
-            borderRadius: '12px', 
-            padding: '12px',
-            color: color
-          }}>
-            {icon}
+  }) => {
+    const [isFocused, setIsFocused] = useState(false)
+    const [localValue, setLocalValue] = useState(value.toString())
+    
+    // Update local value when prop value changes (from external sources)
+    useEffect(() => {
+      if (!isFocused) {
+        setLocalValue(value.toString())
+      }
+    }, [value, isFocused])
+    
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const newValue = e.target.value
+      setLocalValue(newValue)
+      // Don't call onChange here - only update local state
+    }
+    
+    const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === 'Enter') {
+        // User pressed Enter - sync the value
+        const numValue = parseFloat(localValue)
+        if (!isNaN(numValue)) {
+          onChange(numValue)
+        } else if (localValue === '') {
+          onChange(0)
+        }
+        // Remove focus from the input
+        e.currentTarget.blur()
+      }
+    }
+    
+    const handleBlur = () => {
+      setIsFocused(false)
+      // User clicked out - sync the value
+      const numValue = parseFloat(localValue)
+      if (!isNaN(numValue)) {
+        onChange(numValue)
+      } else if (localValue === '') {
+        onChange(0)
+        setLocalValue('0')
+      } else {
+        // Invalid input - revert to original value
+        setLocalValue(value.toString())
+      }
+    }
+    
+    return (
+      <div style={smallCardStyle}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px', marginBottom: '16px' }}>
+          {icon && (
+            <div style={{ 
+              backgroundColor: `${color}20`, 
+              borderRadius: '12px', 
+              padding: '12px',
+              color: color
+            }}>
+              {icon}
+            </div>
+          )}
+          <div style={{ flex: 1 }}>
+            <label htmlFor={id} style={{ 
+              fontSize: '16px', 
+              fontWeight: '600', 
+              color: '#ffffff', 
+              margin: '0 0 4px 0',
+              display: 'block'
+            }}>
+              {label}
+            </label>
+            {description && (
+              <p style={{ 
+                fontSize: '14px', 
+                color: '#9CA3AF', 
+                margin: 0
+              }}>
+                {description}
+              </p>
+            )}
           </div>
-        )}
-        <div style={{ flex: 1 }}>
-          <label htmlFor={id} style={{ 
-            fontSize: '16px', 
-            fontWeight: '600', 
-            color: '#ffffff', 
-            margin: '0 0 4px 0',
-            display: 'block'
-          }}>
-            {label}
-          </label>
-          {description && (
-            <p style={{ 
+        </div>
+        
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <input
+            type="number"
+            id={id}
+            value={localValue}
+            onChange={handleChange}
+            onKeyPress={handleKeyPress}
+            onFocus={() => setIsFocused(true)}
+            onBlur={handleBlur}
+            min={min}
+            max={max}
+            step={step}
+            style={{
+              flex: 1,
+              backgroundColor: '#2D3748',
+              border: `1px solid ${isFocused ? color : '#4A5568'}`,
+              borderRadius: '8px',
+              padding: '12px 16px',
+              color: '#ffffff',
+              fontSize: '14px',
+              outline: 'none',
+              boxShadow: isFocused ? `0 0 0 3px ${color}20` : 'none',
+              transition: 'border-color 0.2s ease, box-shadow 0.2s ease'
+            }}
+          />
+          {unit && (
+            <span style={{ 
               fontSize: '14px', 
               color: '#9CA3AF', 
-              margin: 0
+              fontWeight: '600',
+              minWidth: 'fit-content'
             }}>
-              {description}
-            </p>
+              {unit}
+            </span>
           )}
         </div>
       </div>
-      
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <input
-          type="number"
-          id={id}
-          value={value}
-          onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
-          min={min}
-          max={max}
-          step={step}
-          style={{
-            flex: 1,
-            backgroundColor: '#2D3748',
-            border: '1px solid #4A5568',
-            borderRadius: '8px',
-            padding: '12px 16px',
-            color: '#ffffff',
-            fontSize: '14px',
-            outline: 'none'
-          }}
-          onFocus={(e) => {
-            e.target.style.borderColor = color
-            e.target.style.boxShadow = `0 0 0 3px ${color}20`
-          }}
-          onBlur={(e) => {
-            e.target.style.borderColor = '#4A5568'
-            e.target.style.boxShadow = 'none'
-          }}
-        />
-        {unit && (
-          <span style={{ 
-            fontSize: '14px', 
-            color: '#9CA3AF', 
-            fontWeight: '600',
-            minWidth: 'fit-content'
-          }}>
-            {unit}
-          </span>
-        )}
-      </div>
-    </div>
-  )
+    )
+  }
 
   return (
     <div style={{ padding: '0 8px' }}>
@@ -318,63 +448,84 @@ const Settings = ({ socket }: SettingsProps) => {
       {/* Action Buttons */}
       <div style={{ 
         display: 'flex', 
-        justifyContent: 'flex-end', 
+        justifyContent: 'space-between',
+        alignItems: 'center',
         gap: '12px', 
         marginBottom: '32px' 
       }}>
-        {hasChanges && (
+        {/* Network Status */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          fontSize: '14px',
+          color: isOnline ? '#10B981' : '#9CA3AF'
+        }}>
+          <div style={{
+            width: '8px',
+            height: '8px',
+            borderRadius: '50%',
+            backgroundColor: isOnline ? '#10B981' : '#9CA3AF'
+          }} />
+          {isOnline ? 'Online' : 'Offline'}
+        </div>
+
+        <div style={{ display: 'flex', gap: '12px' }}>
+          {hasChanges && (
+            <button
+              onClick={handleResetSettings}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '12px 20px',
+                backgroundColor: 'transparent',
+                border: '1px solid #6B7280',
+                borderRadius: '8px',
+                color: '#9CA3AF',
+                fontSize: '14px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = '#9CA3AF'
+                e.currentTarget.style.color = '#ffffff'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = '#6B7280'
+                e.currentTarget.style.color = '#9CA3AF'
+              }}
+            >
+              <RotateCcw size={16} />
+              Reset Changes
+            </button>
+          )}
+          
           <button
-            onClick={handleResetSettings}
+            onClick={handleSaveSettings}
+            disabled={!hasChanges || isSaving}
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: '8px',
-              padding: '12px 20px',
-              backgroundColor: 'transparent',
-              border: '1px solid #6B7280',
+              padding: '12px 24px',
+              backgroundColor: hasChanges && !isSaving ? '#00D4AA' : '#6B7280',
+              border: 'none',
               borderRadius: '8px',
-              color: '#9CA3AF',
+              color: '#ffffff',
               fontSize: '14px',
               fontWeight: '600',
-              cursor: 'pointer',
+              cursor: hasChanges && !isSaving ? 'pointer' : 'not-allowed',
+              opacity: hasChanges && !isSaving ? 1 : 0.5,
               transition: 'all 0.2s ease'
             }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = '#9CA3AF'
-              e.currentTarget.style.color = '#ffffff'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = '#6B7280'
-              e.currentTarget.style.color = '#9CA3AF'
-            }}
+            title={socket?.connected ? 'Save to file and sync with server' : 'Save to local file (backend disconnected)'}
           >
-            <RotateCcw size={16} />
-            Reset Changes
+            <Save size={16} />
+            {isSaving ? 'Saving...' : 'Save Changes'}
           </button>
-        )}
-        
-        <button
-          onClick={handleSaveSettings}
-          disabled={!hasChanges || isSaving}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '12px 24px',
-            backgroundColor: hasChanges && !isSaving ? '#00D4AA' : '#6B7280',
-            border: 'none',
-            borderRadius: '8px',
-            color: '#ffffff',
-            fontSize: '14px',
-            fontWeight: '600',
-            cursor: hasChanges && !isSaving ? 'pointer' : 'not-allowed',
-            opacity: hasChanges && !isSaving ? 1 : 0.5,
-            transition: 'all 0.2s ease'
-          }}
-        >
-          <Save size={16} />
-          {isSaving ? 'Saving...' : 'Save Changes'}
-        </button>
+        </div>
       </div>
 
       {/* Execution Settings */}
@@ -402,7 +553,11 @@ const Settings = ({ socket }: SettingsProps) => {
           <ToggleSwitch
             id="simulation_mode"
             checked={settings.SIMULATION_MODE}
-            onChange={(value) => handleInputChange('SIMULATION_MODE', value)}
+            onChange={(value) => {
+              handleInputChange('SIMULATION_MODE', value)
+              // Always ensure the opposite mode is set to the inverse
+              handleInputChange('EXECUTION_MODE', !value)
+            }}
             label="Simulation Mode"
             description="Safe testing without real transactions"
             icon={<Shield size={20} />}
@@ -412,9 +567,13 @@ const Settings = ({ socket }: SettingsProps) => {
           <ToggleSwitch
             id="execution_mode"
             checked={settings.EXECUTION_MODE}
-            onChange={(value) => handleInputChange('EXECUTION_MODE', value)}
+            onChange={(value) => {
+              handleInputChange('EXECUTION_MODE', value)
+              // Always ensure the opposite mode is set to the inverse
+              handleInputChange('SIMULATION_MODE', !value)
+            }}
             label="Live Trading"
-            description="Execute real transactions (disable simulation first)"
+            description="Execute real transactions"
             icon={<Zap size={20} />}
             color="#F59E0B"
           />

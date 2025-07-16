@@ -10,11 +10,59 @@ from collections import defaultdict, deque
 import threading
 import json
 
-# Configure UTF-8 encoding for Windows console output
-if sys.platform == "win32":
-    import codecs
-    sys.stdout = codecs.getwriter("utf-8")(sys.stdout.detach())
-    sys.stderr = codecs.getwriter("utf-8")(sys.stderr.detach())
+# Write to terminal and app
+def setup_dual_logging():
+    """Setup logging to write to both terminal and log file"""
+    # Create logs directory if it doesn't exist
+    log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'logs')
+    os.makedirs(log_dir, exist_ok=True)
+    
+    # Setup file for direct terminal output (separate from captured output)
+    terminal_log_file = os.path.join(log_dir, 'terminal_output.log')
+    
+    # Function to write to both terminal and log file
+    def dual_print(*args, **kwargs):
+        # Original print (may be captured by frontend)
+        original_print(*args, **kwargs)
+        
+        # Force write to terminal by opening a new console if on Windows
+        if sys.platform == "win32":
+            try:
+                # Try to write directly to console
+                import ctypes
+                from ctypes import wintypes
+                
+                # Get console handles
+                STD_OUTPUT_HANDLE = -11
+                
+                h_stdout = ctypes.windll.kernel32.GetStdHandle(STD_OUTPUT_HANDLE)
+                if h_stdout and h_stdout != -1:
+                    message = ' '.join(str(arg) for arg in args) + '\n'
+                    message_bytes = message.encode('utf-8')
+                    bytes_written = wintypes.DWORD()
+                    ctypes.windll.kernel32.WriteConsoleA(
+                        h_stdout, message_bytes, len(message_bytes), 
+                        ctypes.byref(bytes_written), None
+                    )
+            except Exception:
+                pass
+        
+        # Also write to a dedicated terminal log file with timestamp
+        try:
+            with open(terminal_log_file, 'a', encoding='utf-8') as f:
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                message = ' '.join(str(arg) for arg in args)
+                f.write(f"[{timestamp}] {message}\n")
+                f.flush()
+        except Exception:
+            pass
+    
+    return dual_print
+
+# Store original print and setup dual logging
+original_print = print
+dual_print = setup_dual_logging()
+print = dual_print
 
 # Add project root to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -404,7 +452,11 @@ async def monitor_once_optimized(executor, dashboard):
     start_time = time.time()
     
     try:
-        print(f"\n🔄 Monitoring cycle #{dashboard.stats['loop_count'] + 1} started at {datetime.now().strftime('%H:%M:%S')}")
+        cycle_msg = f"\n🔄 Monitoring cycle #{dashboard.stats['loop_count'] + 1} started at {datetime.now().strftime('%H:%M:%S')}"
+        print(cycle_msg)
+        
+        # Force immediate terminal output
+        sys.stdout.flush()
         
         # Parallel price fetching
         all_prices = await get_all_prices_parallel()

@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
 Complete build script for the Arbitrage Bot Tauri application.
+
+⚠️  WARNING: This build script is OUTDATED and references old websocket_server.py
+⚠️  It needs to be updated to use socketio_server.py before use
+⚠️  TODO: Update all references from websocket_server.py to socketio_server.py
+
 This script handles:
 1. Building the standalone Python executable
 2. Building the Tauri application

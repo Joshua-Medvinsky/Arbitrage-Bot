@@ -6,6 +6,7 @@ import Info from './components/Info'
 import StatusBar from './components/StatusBar'
 import { io, Socket } from 'socket.io-client'
 import { showNotification, startArbitrageBot, stopArbitrageBot } from './utils/platform'
+import { loadSettings } from './utils/settings'
 
 // Lazy load the invoke function to speed up initial load
 let invokeModule: any = null
@@ -61,7 +62,7 @@ export interface LogEntry {
 }
 
 export interface InitializationState {
-  stage: 'starting' | 'backend' | 'websocket' | 'complete'
+  stage: 'starting' | 'backend' | 'socketio' | 'complete'
   progress: number
   message: string
 }
@@ -96,6 +97,42 @@ function App() {
     ]
   })
   const [logs, setLogs] = useState<LogEntry[]>([])
+
+  // Handle mode changes from any component (Home or Settings)
+  const handleModeChange = async (simulationMode: boolean) => {
+    const newMode = simulationMode ? 'simulation' : 'live'
+    setBotStatus(prev => ({ ...prev, mode: newMode }))
+    
+    // Save to local settings file immediately
+    try {
+      const { saveSettingsWithServerSync, loadSettings } = await import('./utils/settings')
+      const currentSettings = await loadSettings()
+      const updatedSettings = {
+        ...currentSettings,
+        SIMULATION_MODE: simulationMode,
+        EXECUTION_MODE: !simulationMode
+      }
+      await saveSettingsWithServerSync(updatedSettings, socket)
+      console.log('Mode changed and saved:', newMode)
+    } catch (error) {
+      console.error('Failed to save mode change:', error)
+    }
+  }
+
+  // Load initial mode from local settings
+  useEffect(() => {
+    const loadInitialMode = async () => {
+      try {
+        const settings = await loadSettings()
+        const initialMode = settings.SIMULATION_MODE ? 'simulation' : 'live'
+        setBotStatus(prev => ({ ...prev, mode: initialMode }))
+      } catch (error) {
+        console.error('Failed to load initial mode from settings:', error)
+        // Keep default 'simulation' mode if loading fails
+      }
+    }
+    loadInitialMode()
+  }, [])
 
   // Listen for bot logs from Tauri events
   useEffect(() => {
@@ -151,11 +188,11 @@ function App() {
         const result = await invoke('start_python_backend') as string
         console.log('Backend start result:', result)
         
-        setInitState({ stage: 'websocket', progress: 60, message: 'Connecting to WebSocket...' })
+        setInitState({ stage: 'socketio', progress: 60, message: 'Connecting to Socket.IO server...' })
         
         // Reduced delay for faster connection
         setTimeout(() => {
-          initializeWebSocket()
+          initializeSocketIO()
           // Complete initialization after a shorter delay
           setTimeout(() => {
             setInitState({ stage: 'complete', progress: 100, message: 'Ready to trade!' })
@@ -165,7 +202,7 @@ function App() {
         console.error('Failed to start Python backend:', error)
         setInitState({ stage: 'complete', progress: 100, message: 'Backend connection failed, trying fallback...' })
         // Try to connect anyway in case backend is already running
-        setTimeout(initializeWebSocket, 500) // Reduced from 1000ms
+        setTimeout(initializeSocketIO, 500) // Reduced from 1000ms
       }
     }
 
@@ -180,9 +217,9 @@ function App() {
     }
   }, []) // Remove socket dependency to prevent re-initialization
 
-  const initializeWebSocket = () => {
-    console.log('Connecting to WebSocket...')
-    // Initialize WebSocket connection
+  const initializeSocketIO = () => {
+    console.log('Connecting to Socket.IO server...')
+    // Initialize Socket.IO connection
     const newSocket = io('http://localhost:8000')
     
     newSocket.on('connect', () => {
@@ -234,7 +271,7 @@ function App() {
       // Show notification
       showNotification('Bot Started', 'Arbitrage bot is now running')
       
-      // Also emit to websocket for any additional frontend updates
+      // Also emit to Socket.IO server for any additional frontend updates
       if (socket) {
         socket.emit('start_bot')
       }
@@ -256,7 +293,7 @@ function App() {
       // Show notification
       showNotification('Bot Stopped', 'Arbitrage bot has been stopped')
       
-      // Also emit to websocket for any additional frontend updates
+      // Also emit to Socket.IO server for any additional frontend updates
       if (socket) {
         socket.emit('stop_bot')
       }
@@ -272,11 +309,9 @@ function App() {
     }
   }
 
-  const handleToggleMode = () => {
-    if (socket) {
-      const newMode = botStatus.mode === 'simulation' ? 'live' : 'simulation'
-      socket.emit('toggle_mode', newMode)
-    }
+  const handleToggleMode = async () => {
+    const newSimulationMode = botStatus.mode !== 'simulation'
+    await handleModeChange(newSimulationMode)
   }
 
   const handleToggleSafeMode = () => {
@@ -295,6 +330,7 @@ function App() {
             portfolio={portfolio}
             isConnected={isConnected}
             logs={logs}
+            socket={socket}
             onStart={handleStartBot}
             onStop={handleStopBot}
             onToggleMode={handleToggleMode}
@@ -303,7 +339,7 @@ function App() {
           />
         )
       case 'settings':
-        return <Settings socket={socket} />
+        return <Settings socket={socket} currentMode={botStatus.mode} onModeChange={handleModeChange} />
       case 'info':
         return <Info />
       default:
@@ -429,10 +465,10 @@ function App() {
               display: 'flex', 
               alignItems: 'center', 
               gap: '0.5rem', 
-              color: initState.stage === 'websocket' ? '#F59E0B' : initState.progress > 60 ? '#10B981' : '#9CA3AF', 
+              color: initState.stage === 'socketio' ? '#F59E0B' : initState.progress > 60 ? '#10B981' : '#9CA3AF', 
               fontSize: '0.9rem' 
             }}>
-              <span>{initState.stage === 'websocket' ? '⟳' : initState.progress > 60 ? '✓' : '○'}</span> WebSocket Connection
+              <span>{initState.stage === 'socketio' ? '⟳' : initState.progress > 60 ? '✓' : '○'}</span> Socket.IO Connection
             </div>
           </div>
         </div>
@@ -490,8 +526,7 @@ function App() {
           overflow: 'visible' // Ensure content doesn't get clipped
         }}>
           <StatusBar 
-            status={botStatus} 
-            isConnected={isConnected}
+            status={botStatus}
           />
         </div>
         

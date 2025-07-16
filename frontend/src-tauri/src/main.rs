@@ -8,6 +8,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use serde_json::json;
+use std::fs;
+use std::path::PathBuf;
 
 // Shared state for the Python process
 #[derive(Debug, Clone)]
@@ -58,7 +60,7 @@ async fn start_python_backend(state: State<'_, PythonProcess>) -> Result<String,
     } else {
         // Fall back to Python script
         Command::new("python")
-            .arg("../websocket_server.py")
+            .arg("../socketio_server.py")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -110,16 +112,38 @@ async fn start_arbitrage_bot(state: State<'_, ArbitrageBot>, app_handle: tauri::
         current_dir.join("scripts/monitoring/arbitrage_bot.py")
     };
     
-    let mut child = Command::new("python")
+    // Check if script file exists
+    if !script_path.exists() {
+        return Err(format!("Arbitrage bot script not found at: {:?}", script_path));
+    }
+    
+    // Try to find the right Python command for the platform
+    let python_cmd = if cfg!(target_os = "windows") {
+        "python"
+    } else {
+        // On macOS and Linux, try python3 first, then python
+        if Command::new("python3").arg("--version").output().is_ok() {
+            "python3"
+        } else {
+            "python"
+        }
+    };
+    
+    // Test if Python command works before starting the script
+    if Command::new(python_cmd).arg("--version").output().is_err() {
+        return Err(format!("Python command '{}' not found. Please ensure Python is installed and available in PATH.", python_cmd));
+    }
+    
+    let mut child = Command::new(python_cmd)
         .arg("-u") // Force unbuffered stdout/stderr
         .arg(&script_path)
         .env("PYTHONIOENCODING", "utf-8") // Set UTF-8 encoding for Python
         .stdout(Stdio::piped())
-        .stderr(Stdio::null()) // Completely ignore stderr to test for duplicates
+        .stderr(Stdio::piped()) // Capture stderr to get error details
         .spawn()
-        .map_err(|e| format!("Failed to start arbitrage bot at {:?}: {}", script_path, e))?;
+        .map_err(|e| format!("Failed to start arbitrage bot with {} at {:?}: {}", python_cmd, script_path, e))?;
 
-    // Capture ONLY stdout for logging
+    // Capture BOTH stdout and stderr for logging and error handling
     if let Some(stdout) = child.stdout.take() {
         let app_handle_clone = app_handle.clone();
         thread::spawn(move || {
@@ -135,6 +159,30 @@ async fn start_arbitrage_bot(state: State<'_, ArbitrageBot>, app_handle: tauri::
                             let _ = window.emit("bot-log", json!({
                                 "level": "info",
                                 "message": cleaned_line,
+                                "timestamp": chrono::Utc::now().timestamp_millis(),
+                                "source": "arbitrage_bot.py"
+                            }));
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    if let Some(stderr) = child.stderr.take() {
+        let app_handle_clone = app_handle.clone();
+        thread::spawn(move || {
+            use std::io::{BufRead, BufReader};
+            let reader = BufReader::new(stderr);
+            for line in reader.lines() {
+                if let Ok(line) = line {
+                    let cleaned_line = line.trim();
+                    if !cleaned_line.is_empty() {
+                        // Send error logs to frontend
+                        if let Some(window) = app_handle_clone.get_window("main") {
+                            let _ = window.emit("bot-log", json!({
+                                "level": "error",
+                                "message": format!("ERROR: {}", cleaned_line),
                                 "timestamp": chrono::Utc::now().timestamp_millis(),
                                 "source": "arbitrage_bot.py"
                             }));
@@ -166,6 +214,50 @@ async fn stop_arbitrage_bot(state: State<'_, ArbitrageBot>) -> Result<String, St
 async fn get_arbitrage_bot_status(state: State<'_, ArbitrageBot>) -> Result<bool, String> {
     let process_guard = state.0.lock().map_err(|e| format!("Failed to lock state: {}", e))?;
     Ok(process_guard.is_some())
+}
+
+#[tauri::command]
+async fn read_settings_file() -> Result<String, String> {
+    let env_path = get_env_file_path()?;
+    
+    match fs::read_to_string(&env_path) {
+        Ok(content) => Ok(content),
+        Err(e) => {
+            // If file doesn't exist, return empty string (will create default settings)
+            if e.kind() == std::io::ErrorKind::NotFound {
+                Ok(String::new())
+            } else {
+                Err(format!("Failed to read settings file: {}", e))
+            }
+        }
+    }
+}
+
+#[tauri::command]
+async fn write_settings_file(content: String) -> Result<(), String> {
+    let env_path = get_env_file_path()?;
+    
+    // Ensure parent directory exists
+    if let Some(parent) = env_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
+    
+    fs::write(&env_path, content).map_err(|e| format!("Failed to write settings file: {}", e))?;
+    Ok(())
+}
+
+fn get_env_file_path() -> Result<PathBuf, String> {
+    let current_dir = std::env::current_dir().map_err(|e| format!("Failed to get current directory: {}", e))?;
+    
+    let env_path = if current_dir.ends_with("src-tauri") {
+        // Running from frontend/src-tauri (development mode)
+        current_dir.parent().unwrap().parent().unwrap().join(".env")
+    } else {
+        // Running from project root or other location
+        current_dir.join(".env")
+    };
+    
+    Ok(env_path)
 }
 
 fn main() {
@@ -275,7 +367,9 @@ fn main() {
             get_backend_status,
             start_arbitrage_bot,
             stop_arbitrage_bot,
-            get_arbitrage_bot_status
+            get_arbitrage_bot_status,
+            read_settings_file,
+            write_settings_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
