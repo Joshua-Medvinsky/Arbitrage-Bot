@@ -376,6 +376,72 @@ class MonitoringDashboard:
                     print(f"   {time_str} | {opp['pair']} | {opp['buy_dex']}→{opp['sell_dex']} | ${opp['profit_usd']:.2f} ({opp['profit_pct']:.2f}%)")
             
             print("="*80)
+
+    def write_stats_json(self):
+        """Write monitoring stats to logs/monitoring_stats.json for Tauri frontend, matching print_dashboard order and structure"""
+        import json
+        import os
+        from datetime import datetime
+        with self.lock:
+            # Uptime string (same as print_dashboard)
+            uptime = self.get_uptime()
+            # Best opportunity
+            best_opportunity = None
+            if self.stats['best_opportunity']:
+                best = self.stats['best_opportunity']
+                best_opportunity = {
+                    "pair": best["pair"],
+                    "buyDex": best["buy_dex"],
+                    "sellDex": best["sell_dex"],
+                    "profitUsd": best["profit_usd"],
+                    "profitPct": best["profit_pct"],
+                    "time": best["time"].strftime('%H:%M:%S')
+                }
+            # Top DEX routes
+            top_dex_routes = []
+            if self.stats['dex_stats']:
+                sorted_dex = sorted(self.stats['dex_stats'].items(), key=lambda x: x[1], reverse=True)
+                for route, count in sorted_dex[:5]:
+                    top_dex_routes.append({"route": route, "count": count})
+            # Top pairs
+            top_pairs = []
+            if self.stats['pair_stats']:
+                sorted_pairs = sorted(self.stats['pair_stats'].items(), key=lambda x: x[1], reverse=True)
+                for pair, count in sorted_pairs[:5]:
+                    top_pairs.append({"pair": pair, "count": count})
+            # Recent opportunities
+            recent_opps = []
+            if self.stats['recent_opportunities']:
+                for opp in list(self.stats['recent_opportunities'])[-5:]:
+                    recent_opps.append({
+                        "time": opp['time'].strftime('%H:%M:%S'),
+                        "pair": opp['pair'],
+                        "buyDex": opp['buy_dex'],
+                        "sellDex": opp['sell_dex'],
+                        "profitUsd": opp['profit_usd'],
+                        "profitPct": opp['profit_pct']
+                    })
+            stats_out = {
+                "uptime": uptime,
+                "loopCount": self.stats['loop_count'],
+                "avgExecutionTime": round(self.get_avg_execution_time(), 1),
+                "totalOpportunitiesFound": self.stats['total_opportunities_found'],
+                "opportunitiesExecuted": self.stats['opportunities_executed'],
+                "opportunitiesPerHour": round(self.get_opportunities_per_hour(), 1),
+                "errors": self.stats['errors'],
+                "bestOpportunity": best_opportunity,
+                "topDexRoutes": top_dex_routes,
+                "topPairs": top_pairs,
+                "recentOpportunities": recent_opps
+            }
+            logs_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs")
+            os.makedirs(logs_dir, exist_ok=True)
+            stats_path = os.path.join(logs_dir, "monitoring_stats.json")
+            try:
+                with open(stats_path, "w", encoding="utf-8") as f:
+                    json.dump(stats_out, f, indent=2)
+            except Exception as e:
+                print(f"[ERROR] Could not write monitoring_stats.json: {e}")
     
     def start_dashboard_thread(self):
         """Start dashboard update thread"""
@@ -383,12 +449,12 @@ class MonitoringDashboard:
             while self.running:
                 try:
                     self.print_dashboard()
+                    self.write_stats_json()
                     time.sleep(DASHBOARD_UPDATE_INTERVAL)
                 except KeyboardInterrupt:
                     break
                 except Exception as e:
                     print(f"Dashboard error: {e}")
-        
         dashboard_thread = threading.Thread(target=dashboard_loop, daemon=True)
         dashboard_thread.start()
         return dashboard_thread

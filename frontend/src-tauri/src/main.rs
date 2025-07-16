@@ -10,6 +10,8 @@ use std::time::Duration;
 use serde_json::json;
 use std::fs;
 use std::path::PathBuf;
+use serde::{Deserialize, Serialize};
+use chrono;
 
 // Shared state for the Python process
 #[derive(Debug, Clone)]
@@ -19,10 +21,54 @@ struct PythonProcess(Arc<Mutex<Option<Child>>>);
 #[derive(Debug, Clone)]
 struct ArbitrageBot(Arc<Mutex<Option<Child>>>);
 
+// Monitoring stats structure for frontend
+#[derive(Serialize, Deserialize, Clone)]
+struct MonitoringStats {
+    #[serde(rename = "startTime")]
+    start_time: i64,
+    #[serde(rename = "loopCount")]
+    loop_count: i64,
+    #[serde(rename = "totalOpportunitiesFound")]
+    total_opportunities_found: i64,
+    #[serde(rename = "opportunitiesExecuted")]
+    opportunities_executed: i64,
+    #[serde(rename = "totalProfitUsd")]
+    total_profit_usd: f64,
+    errors: i64,
+    #[serde(rename = "avgExecutionTime")]
+    avg_execution_time: f64,
+    #[serde(rename = "opportunitiesPerHour")]
+    opportunities_per_hour: f64,
+    uptime: i64, // Uptime in seconds
+    #[serde(rename = "lastOpportunityTime")]
+    last_opportunity_time: Option<i64>,
+    #[serde(rename = "bestOpportunity")]
+    best_opportunity: Option<BestOpportunity>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct BestOpportunity {
+    pair: String,
+    #[serde(rename = "buyDex")]
+    buy_dex: String,
+    #[serde(rename = "sellDex")]
+    sell_dex: String,
+    #[serde(rename = "profitUsd")]
+    profit_usd: f64,
+    #[serde(rename = "profitPct")]
+    profit_pct: f64,
+    time: i64,
+}
+
 // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
+}
+
+#[tauri::command]
+async fn test_monitoring_command() -> Result<String, String> {
+    Ok("Test monitoring command works!".to_string())
 }
 
 #[tauri::command]
@@ -260,6 +306,102 @@ fn get_env_file_path() -> Result<PathBuf, String> {
     Ok(env_path)
 }
 
+#[tauri::command]
+async fn get_monitoring_stats() -> Result<MonitoringStats, String> {
+    // For now, return mock data. In a real implementation, this would read from
+    // a shared file or communicate with the Python monitoring script
+    let current_time = chrono::Utc::now().timestamp_millis();
+    
+    // Check if there's a monitoring data file we can read from
+    let monitoring_file = get_monitoring_file_path()?;
+    
+    if monitoring_file.exists() {
+        // Try to read actual monitoring data
+        match fs::read_to_string(&monitoring_file) {
+            Ok(content) => {
+                if let Ok(stats) = serde_json::from_str::<MonitoringStats>(&content) {
+                    return Ok(stats);
+                }
+            }
+            Err(_) => {
+                // File exists but can't read, continue to return mock data
+            }
+        }
+    }
+    
+    // Return mock/default monitoring stats if no file or parsing fails
+    Ok(MonitoringStats {
+        start_time: current_time - 3600000, // 1 hour ago
+        loop_count: 1234,
+        total_opportunities_found: 45,
+        opportunities_executed: 12,
+        total_profit_usd: 123.45,
+        errors: 2,
+        avg_execution_time: 2.3,
+        opportunities_per_hour: 12.5,
+        uptime: 3600, // 1 hour in seconds
+        last_opportunity_time: Some(current_time - 300000), // 5 minutes ago
+        best_opportunity: Some(BestOpportunity {
+            pair: "ETH/USDC".to_string(),
+            buy_dex: "Uniswap".to_string(),
+            sell_dex: "SushiSwap".to_string(),
+            profit_usd: 25.67,
+            profit_pct: 2.45,
+            time: current_time - 1800000, // 30 minutes ago
+        }),
+    })
+}
+
+fn get_monitoring_file_path() -> Result<PathBuf, String> {
+    let current_dir = std::env::current_dir().map_err(|e| format!("Failed to get current directory: {}", e))?;
+    
+    let monitoring_path = if current_dir.ends_with("src-tauri") {
+        // Running from frontend/src-tauri (development mode)
+        current_dir.parent().unwrap().parent().unwrap().join("logs").join("monitoring_stats.json")
+    } else {
+        // Running from project root or other location
+        current_dir.join("logs").join("monitoring_stats.json")
+    };
+    
+    Ok(monitoring_path)
+}
+
+#[tauri::command]
+async fn get_arbitrage_opportunities() -> Result<Vec<serde_json::Value>, String> {
+    // For now, return mock opportunities. In a real implementation, this would read from
+    // a shared file or communicate with the Python monitoring script
+    let current_time = chrono::Utc::now().timestamp_millis();
+    
+    let opportunities = vec![
+        json!({
+            "id": "1",
+            "pair": "ETH/USDC",
+            "buyDex": "Uniswap V3",
+            "sellDex": "SushiSwap",
+            "buyPrice": 2456.78,
+            "sellPrice": 2478.90,
+            "profitPct": 0.89,
+            "profitUsd": 12.34,
+            "volume": 50000.0,
+            "timestamp": current_time
+        }),
+        json!({
+            "id": "2", 
+            "pair": "BTC/USDC",
+            "buyDex": "Aerodrome",
+            "sellDex": "Balancer V2",
+            "buyPrice": 67890.12,
+            "sellPrice": 68234.56,
+            "profitPct": 0.51,
+            "profitUsd": 8.76,
+            "volume": 25000.0,
+            "timestamp": current_time - 30000
+        })
+    ];
+    
+    Ok(opportunities)
+}
+
 fn main() {
     // System tray menu
     let quit = CustomMenuItem::new("quit".to_string(), "Quit");
@@ -361,6 +503,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             greet, 
+            test_monitoring_command,
             show_notification, 
             start_python_backend, 
             stop_python_backend, 
@@ -369,7 +512,9 @@ fn main() {
             stop_arbitrage_bot,
             get_arbitrage_bot_status,
             read_settings_file,
-            write_settings_file
+            write_settings_file,
+            get_monitoring_stats,
+            get_arbitrage_opportunities
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

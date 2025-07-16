@@ -13,7 +13,7 @@ import {
   Gauge,
   Lock
 } from 'lucide-react'
-import { loadSettings, saveSettingsWithServerSync } from '../utils/settings'
+import { loadSettings, saveSettings } from '../utils/settings'
 
 interface SettingsData {
   SIMULATION_MODE: boolean
@@ -32,12 +32,11 @@ interface SettingsData {
 }
 
 interface SettingsProps {
-  socket: any
   currentMode?: 'simulation' | 'live'
   onModeChange?: (simulationMode: boolean) => Promise<void>
 }
 
-const Settings = ({ socket, currentMode, onModeChange }: SettingsProps) => {
+const Settings = ({ currentMode, onModeChange }: SettingsProps) => {
   const [settings, setSettings] = useState<SettingsData>({
     SIMULATION_MODE: true,
     FLASH_LOAN_ENABLED: false,
@@ -74,51 +73,20 @@ const Settings = ({ socket, currentMode, onModeChange }: SettingsProps) => {
   }
 
   useEffect(() => {
-    // Load settings from local file first
+    // Load settings from local file
     const loadLocalSettings = async () => {
       try {
         console.log('Loading settings from local file...')
         const localSettings = await loadSettings()
         console.log('Loaded local settings:', localSettings)
         setSettings(localSettings)
-        // Don't need to notify App component since App is now the source of truth
       } catch (error) {
         console.error('Failed to load local settings:', error)
       }
     }
 
     loadLocalSettings()
-
-    // Also request current settings from server if available
-    if (socket) {
-      console.log('Requesting settings from server...')
-      socket.emit('get_settings')
-      
-      socket.on('settings_data', (data: SettingsData) => {
-        console.log('Received settings data from server:', data)
-        // Server settings take precedence over local (in case of discrepancies)
-        setSettings(data)
-        // Don't need to notify App component since App is now the source of truth
-      })
-
-      // Add handler for save confirmation
-      socket.on('settings_updated', (response: { success: boolean; message: string; settings?: SettingsData }) => {
-        console.log('Received settings_updated response from server:', response)
-        if (response.success && response.settings) {
-          console.log('Server confirmed settings update')
-        } else if (!response.success) {
-          console.error('Server failed to save settings:', response.message)
-        }
-      })
-    }
-
-    return () => {
-      if (socket) {
-        socket.off('settings_data')
-        socket.off('settings_updated')
-      }
-    }
-  }, [socket])
+  }, [])
 
   // Sync Settings component mode with App component mode
   useEffect(() => {
@@ -171,8 +139,8 @@ const Settings = ({ socket, currentMode, onModeChange }: SettingsProps) => {
     setIsSaving(true)
     
     try {
-      // Use local-first save approach
-      const result = await saveSettingsWithServerSync(settings, socket)
+      // Use local save approach
+      const result = await saveSettings(settings)
       
       setIsSaving(false)
       if (result.success) {
@@ -196,10 +164,6 @@ const Settings = ({ socket, currentMode, onModeChange }: SettingsProps) => {
       console.log('Settings reset successfully')
     } catch (error) {
       console.error('Failed to reset settings:', error)
-      // Fallback: request from server if local load fails
-      if (socket) {
-        socket.emit('get_settings')
-      }
     }
   }
 
@@ -520,7 +484,7 @@ const Settings = ({ socket, currentMode, onModeChange }: SettingsProps) => {
               opacity: hasChanges && !isSaving ? 1 : 0.5,
               transition: 'all 0.2s ease'
             }}
-            title={socket?.connected ? 'Save to file and sync with server' : 'Save to local file (backend disconnected)'}
+            title="Save settings to local file"
           >
             <Save size={16} />
             {isSaving ? 'Saving...' : 'Save Changes'}
