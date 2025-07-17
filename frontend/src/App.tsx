@@ -4,7 +4,6 @@ import Home from './components/Home'
 import Settings from './components/Settings'
 import Info from './components/Info'
 import StatusBar from './components/StatusBar'
-import { io, Socket } from 'socket.io-client'
 import { showNotification, startArbitrageBot, stopArbitrageBot } from './utils/platform'
 import { loadSettings } from './utils/settings'
 
@@ -39,6 +38,27 @@ export interface BotStatus {
   uptime: number
 }
 
+export interface MonitoringStats {
+  startTime: number
+  loopCount: number
+  totalOpportunitiesFound: number
+  opportunitiesExecuted: number
+  totalProfitUsd: number
+  errors: number
+  avgExecutionTime: number
+  opportunitiesPerHour: number
+  uptime: number // Uptime in seconds
+  lastOpportunityTime?: number
+  bestOpportunity?: {
+    pair: string
+    buyDex: string
+    sellDex: string
+    profitUsd: number
+    profitPct: number
+    time: number
+  }
+}
+
 export interface Portfolio {
   totalValue: number
   totalProfit: number
@@ -62,13 +82,12 @@ export interface LogEntry {
 }
 
 export interface InitializationState {
-  stage: 'starting' | 'backend' | 'socketio' | 'complete'
+  stage: 'starting' | 'backend' | 'complete'
   progress: number
   message: string
 }
 
 function App() {
-  const [socket, setSocket] = useState<Socket | null>(null)
   const [opportunities, setOpportunities] = useState<ArbitrageOpportunity[]>([])
   const [botStatus, setBotStatus] = useState<BotStatus>({
     isRunning: false,
@@ -78,7 +97,17 @@ function App() {
     totalTrades: 0,
     uptime: 0
   })
-  const [isConnected, setIsConnected] = useState(false)
+  const [monitoringStats, setMonitoringStats] = useState<MonitoringStats>({
+    startTime: Date.now(),
+    loopCount: 0,
+    totalOpportunitiesFound: 0,
+    opportunitiesExecuted: 0,
+    totalProfitUsd: 0,
+    errors: 0,
+    avgExecutionTime: 0,
+    opportunitiesPerHour: 0,
+    uptime: 0
+  })
   const [activeTab, setActiveTab] = useState<TabType>('home')
   const [initState, setInitState] = useState<InitializationState>({
     stage: 'starting',
@@ -105,14 +134,14 @@ function App() {
     
     // Save to local settings file immediately
     try {
-      const { saveSettingsWithServerSync, loadSettings } = await import('./utils/settings')
+      const { saveSettings, loadSettings } = await import('./utils/settings')
       const currentSettings = await loadSettings()
       const updatedSettings = {
         ...currentSettings,
         SIMULATION_MODE: simulationMode,
         EXECUTION_MODE: !simulationMode
       }
-      await saveSettingsWithServerSync(updatedSettings, socket)
+      await saveSettings(updatedSettings)
       console.log('Mode changed and saved:', newMode)
     } catch (error) {
       console.error('Failed to save mode change:', error)
@@ -133,6 +162,95 @@ function App() {
     }
     loadInitialMode()
   }, [])
+
+  // Fetch monitoring stats periodically
+  useEffect(() => {
+    const fetchMonitoringStats = async () => {
+      try {
+        const { readTextFile, BaseDirectory } = await import('@tauri-apps/api/fs')
+        let statsRaw = null;
+        let lastError = null;
+        // Try multiple base directories for maximum compatibility
+        const dirs = [BaseDirectory.Resource, BaseDirectory.App, BaseDirectory.Desktop, BaseDirectory.Document, BaseDirectory.Download, BaseDirectory.Home];
+        for (const dir of dirs) {
+          try {
+            statsRaw = await readTextFile('logs/monitoring_stats.json', { dir });
+            if (statsRaw) {
+              console.log('Fetched monitoring stats from file (dir):', dir);
+              break;
+            }
+          } catch (err) {
+            lastError = err;
+          }
+        }
+        if (!statsRaw) throw lastError || new Error('Could not read monitoring_stats.json from any base directory');
+        const stats = JSON.parse(statsRaw) as MonitoringStats;
+        setMonitoringStats(stats);
+        console.log('Fetched monitoring stats from file:', stats);
+      } catch (error) {
+        console.warn('Could not fetch monitoring stats from file:', error);
+        setMonitoringStats(prev => {
+          const currentTime = Date.now();
+          const sessionUptime = Math.floor((currentTime - prev.startTime) / 1000);
+          return {
+            ...prev,
+            uptime: sessionUptime
+          };
+        });
+      }
+    };
+
+    fetchMonitoringStats();
+    const statsInterval = setInterval(fetchMonitoringStats, 5000);
+    return () => clearInterval(statsInterval);
+  }, [])
+
+  // Fetch arbitrage opportunities periodically, only show mock data in simulation mode
+  useEffect(() => {
+    const fetchOpportunities = async () => {
+      if (botStatus.mode === 'simulation') {
+        const mockOpportunities: ArbitrageOpportunity[] = [
+          {
+            id: "1",
+            pair: "ETH/USDC",
+            buyDex: "Uniswap V3",
+            sellDex: "SushiSwap",
+            buyPrice: 2456.78,
+            sellPrice: 2478.90,
+            profitPct: 0.89,
+            profitUsd: 12.34,
+            volume: 50000.0,
+            timestamp: Date.now()
+          },
+          {
+            id: "2",
+            pair: "BTC/USDC",
+            buyDex: "Aerodrome",
+            sellDex: "Balancer V2",
+            buyPrice: 67890.12,
+            sellPrice: 68234.56,
+            profitPct: 0.51,
+            profitUsd: 8.76,
+            volume: 25000.0,
+            timestamp: Date.now() - 30000
+          }
+        ];
+        setOpportunities(mockOpportunities);
+        console.log('Using mock opportunities data (simulation mode)');
+      } else {
+        setOpportunities([]);
+        console.log('Cleared opportunities (live mode)');
+      }
+    };
+
+    // Fetch immediately
+    fetchOpportunities();
+
+    // Set up interval to fetch every 3 seconds
+    const oppsInterval = setInterval(fetchOpportunities, 3000);
+
+    return () => clearInterval(oppsInterval);
+  }, [botStatus.mode]);
 
   // Listen for bot logs from Tauri events
   useEffect(() => {
@@ -182,99 +300,43 @@ function App() {
   useEffect(() => {
     const initializeBackend = async () => {
       try {
-        setInitState({ stage: 'backend', progress: 25, message: 'Starting Python backend...' })
+        setInitState({ stage: 'backend', progress: 50, message: 'Starting Python backend...' })
         
         const invoke = await getInvoke()
+        
         const result = await invoke('start_python_backend') as string
         console.log('Backend start result:', result)
         
-        setInitState({ stage: 'socketio', progress: 60, message: 'Connecting to Socket.IO server...' })
-        
-        // Reduced delay for faster connection
+        // Complete initialization
         setTimeout(() => {
-          initializeSocketIO()
-          // Complete initialization after a shorter delay
-          setTimeout(() => {
-            setInitState({ stage: 'complete', progress: 100, message: 'Ready to trade!' })
-          }, 800) // Reduced from 1500ms
-        }, 1500) // Reduced from 3000ms
+          setInitState({ stage: 'complete', progress: 100, message: 'Ready to trade!' })
+        }, 1000)
       } catch (error) {
         console.error('Failed to start Python backend:', error)
-        setInitState({ stage: 'complete', progress: 100, message: 'Backend connection failed, trying fallback...' })
-        // Try to connect anyway in case backend is already running
-        setTimeout(initializeSocketIO, 500) // Reduced from 1000ms
+        setInitState({ stage: 'complete', progress: 100, message: 'Backend connection failed, ready for manual control...' })
       }
     }
 
     // Only initialize once when the component mounts
     initializeBackend()
-
-    // Cleanup function
-    return () => {
-      if (socket) {
-        socket.disconnect()
-      }
-    }
-  }, []) // Remove socket dependency to prevent re-initialization
-
-  const initializeSocketIO = () => {
-    console.log('Connecting to Socket.IO server...')
-    // Initialize Socket.IO connection
-    const newSocket = io('http://localhost:8000')
-    
-    newSocket.on('connect', () => {
-      console.log('Connected to arbitrage bot')
-      setIsConnected(true)
-    })
-    
-    newSocket.on('disconnect', () => {
-      console.log('Disconnected from arbitrage bot')
-      setIsConnected(false)
-    })
-    
-    newSocket.on('opportunity', (data: ArbitrageOpportunity) => {
-      setOpportunities(prev => {
-        // Add new opportunity at the end and keep only latest 100
-        const updated = [...prev, data].slice(-100)
-        return updated
-      })
-    })
-    
-    newSocket.on('status', (data: BotStatus) => {
-      setBotStatus(data)
-    })
-    
-    newSocket.on('trade_executed', (data: { profit: number }) => {
-      if (data.profit > 0) {
-        showNotification('Trade Executed!', `Profit: $${data.profit.toFixed(2)}`)
-      }
-      
-      setBotStatus(prev => ({
-        ...prev,
-        totalProfit: prev.totalProfit + data.profit,
-        totalTrades: prev.totalTrades + 1
-      }))
-    })
-
-    setSocket(newSocket)
-  }
+  }, [])
 
   const handleStartBot = async () => {
+    console.log('handleStartBot called, current botStatus:', botStatus)
     try {
       // Start the actual arbitrage bot Python script
       const result = await startArbitrageBot()
       console.log('Arbitrage bot start result:', result)
       
       // Update bot status to running
-      setBotStatus(prev => ({ ...prev, isRunning: true }))
+      setBotStatus(prev => {
+        const newStatus = { ...prev, isRunning: true }
+        console.log('Setting botStatus to:', newStatus)
+        return newStatus
+      })
       
       // Show notification
       showNotification('Bot Started', 'Arbitrage bot is now running')
-      
-      // Also emit to Socket.IO server for any additional frontend updates
-      if (socket) {
-        socket.emit('start_bot')
-      }
     } catch (error) {
       console.error('Failed to start arbitrage bot:', error)
       showNotification('Error', 'Failed to start arbitrage bot')
@@ -282,30 +344,36 @@ function App() {
   }
 
   const handleStopBot = async () => {
+    console.log('handleStopBot called, current botStatus:', botStatus)
     try {
       // Stop the arbitrage bot Python script
       const result = await stopArbitrageBot()
       console.log('Arbitrage bot stop result:', result)
       
       // Update bot status to stopped
-      setBotStatus(prev => ({ ...prev, isRunning: false }))
+      setBotStatus(prev => {
+        const newStatus = { ...prev, isRunning: false }
+        console.log('Setting botStatus to:', newStatus)
+        return newStatus
+      })
       
       // Show notification
       showNotification('Bot Stopped', 'Arbitrage bot has been stopped')
-      
-      // Also emit to Socket.IO server for any additional frontend updates
-      if (socket) {
-        socket.emit('stop_bot')
-      }
     } catch (error) {
       console.error('Failed to stop arbitrage bot:', error)
       showNotification('Error', 'Failed to stop arbitrage bot')
     }
   }
 
-  const handleExecuteTrade = (opportunity: ArbitrageOpportunity) => {
-    if (socket) {
-      socket.emit('execute_trade', opportunity)
+  const handleExecuteTrade = async (opportunity: ArbitrageOpportunity) => {
+    // Handle trade execution through Tauri
+    try {
+      const invoke = await getInvoke()
+      await invoke('execute_trade', { opportunity })
+      showNotification('Trade Executed', `Executing trade for ${opportunity.pair}`)
+    } catch (error) {
+      console.error('Failed to execute trade:', error)
+      showNotification('Error', 'Failed to execute trade')
     }
   }
 
@@ -314,9 +382,14 @@ function App() {
     await handleModeChange(newSimulationMode)
   }
 
-  const handleToggleSafeMode = () => {
-    if (socket) {
-      socket.emit('toggle_safe_mode', !botStatus.safeMode)
+  const handleToggleSafeMode = async () => {
+    // Handle safe mode toggle through Tauri
+    try {
+      const invoke = await getInvoke()
+      await invoke('toggle_safe_mode', { enabled: !botStatus.safeMode })
+      setBotStatus(prev => ({ ...prev, safeMode: !prev.safeMode }))
+    } catch (error) {
+      console.error('Failed to toggle safe mode:', error)
     }
   }
 
@@ -328,9 +401,8 @@ function App() {
             opportunities={opportunities}
             status={botStatus}
             portfolio={portfolio}
-            isConnected={isConnected}
             logs={logs}
-            socket={socket}
+            monitoringStats={monitoringStats}
             onStart={handleStartBot}
             onStop={handleStopBot}
             onToggleMode={handleToggleMode}
@@ -339,7 +411,7 @@ function App() {
           />
         )
       case 'settings':
-        return <Settings socket={socket} currentMode={botStatus.mode} onModeChange={handleModeChange} />
+        return <Settings currentMode={botStatus.mode} onModeChange={handleModeChange} />
       case 'info':
         return <Info />
       default:
@@ -456,19 +528,19 @@ function App() {
               display: 'flex', 
               alignItems: 'center', 
               gap: '0.5rem', 
-              color: initState.stage === 'backend' ? '#F59E0B' : initState.progress > 25 ? '#10B981' : '#9CA3AF', 
+              color: initState.stage === 'backend' ? '#F59E0B' : initState.progress > 50 ? '#10B981' : '#9CA3AF', 
               fontSize: '0.9rem' 
             }}>
-              <span>{initState.stage === 'backend' ? '⟳' : initState.progress > 25 ? '✓' : '○'}</span> Backend Services
+              <span>{initState.stage === 'backend' ? '⟳' : initState.progress > 50 ? '✓' : '○'}</span> Backend Services
             </div>
             <div style={{ 
               display: 'flex', 
               alignItems: 'center', 
               gap: '0.5rem', 
-              color: initState.stage === 'socketio' ? '#F59E0B' : initState.progress > 60 ? '#10B981' : '#9CA3AF', 
+              color: initState.progress === 100 ? '#10B981' : '#9CA3AF', 
               fontSize: '0.9rem' 
             }}>
-              <span>{initState.stage === 'socketio' ? '⟳' : initState.progress > 60 ? '✓' : '○'}</span> Socket.IO Connection
+              <span>{initState.progress === 100 ? '✓' : '○'}</span> System Ready
             </div>
           </div>
         </div>

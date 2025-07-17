@@ -1,15 +1,12 @@
-import { ArbitrageOpportunity, BotStatus, Portfolio, LogEntry } from '../App'
-import { TrendingUp, Activity, DollarSign, Target, Shield, Play, Square, BarChart3, Clock, Users, ScrollText, AlertCircle, CheckCircle, Info, XCircle, Wifi, WifiOff } from 'lucide-react'
-import { useState, useEffect } from 'react'
-import { getBotStatus, startBotLocal, stopBotLocal, toggleSafeMode, type LocalBotState } from '../utils/botControl'
+import { ArbitrageOpportunity, BotStatus, Portfolio, LogEntry, MonitoringStats } from '../App'
+import { TrendingUp, Activity, DollarSign, Target, Shield, Play, Square, BarChart3, Clock, Users, ScrollText, AlertCircle, CheckCircle, Info, XCircle, Wifi } from 'lucide-react'
 
 interface HomeProps {
   opportunities: ArbitrageOpportunity[]
   status: BotStatus
   portfolio: Portfolio
-  isConnected: boolean
   logs: LogEntry[]
-  socket?: any // Add socket for server sync
+  monitoringStats: MonitoringStats
   onStart: () => void
   onStop: () => void
   onToggleMode: () => void
@@ -21,290 +18,32 @@ const Home = ({
   opportunities,
   status,
   portfolio,
-  isConnected,
   logs,
-  socket,
+  monitoringStats,
   onStart,
   onStop,
   onToggleMode,
   onToggleSafeMode,
   onExecuteTrade
 }: HomeProps) => {
-  const [localBotState, setLocalBotState] = useState<LocalBotState | null>(null)
-  const [isOnline, setIsOnline] = useState(navigator.onLine)
-
-  // Load local bot state on component mount
-  useEffect(() => {
-    const loadLocalState = async () => {
-      try {
-        const state = await getBotStatus()
-        setLocalBotState(state)
-        console.log('Loaded local bot state:', state)
-      } catch (error) {
-        console.error('Failed to load local bot state:', error)
-        // Set a default state that matches the current .env settings
-        const fallbackState = {
-          isRunning: false,
-          mode: 'live' as const, // Based on .env: SIMULATION_MODE=false
-          safeMode: true, // Based on .env: SAFE_MODE=true
-          sessionTrades: 0,
-          sessionProfit: 0
-        }
-        setLocalBotState(fallbackState)
-        console.log('Using fallback bot state:', fallbackState)
-      }
-    }
-    loadLocalState()
-  }, [])
-
-  // Sync localBotState with App's status prop changes (especially mode changes)
-  useEffect(() => {
-    if (localBotState && status) {
-      // Update localBotState when App's status changes, especially mode changes
-      const updatedState = {
-        ...localBotState,
-        mode: status.mode, // Sync mode from App
-        safeMode: status.safeMode, // Sync safe mode from App
-        // Keep local running state and session data unchanged
-      }
-      setLocalBotState(updatedState)
-      console.log('Synced localBotState with App status:', updatedState)
-    }
-  }, [status.mode, status.safeMode]) // Only sync when mode or safeMode changes
-
-  // Monitor internet connectivity
-  useEffect(() => {
-    const handleOnline = () => setIsOnline(true)
-    const handleOffline = () => setIsOnline(false)
-
-    window.addEventListener('online', handleOnline)
-    window.addEventListener('offline', handleOffline)
-
-    return () => {
-      window.removeEventListener('online', handleOnline)
-      window.removeEventListener('offline', handleOffline)
-    }
-  }, [])
-
-  // Debug: Log server status changes
-  useEffect(() => {
-    console.log('Server status prop changed:', {
-      isRunning: status.isRunning,
-      mode: status.mode,
-      safeMode: status.safeMode,
-      isConnected
-    })
-  }, [status.isRunning, status.mode, status.safeMode, isConnected])
-
-  // Handle connection loss in live mode - auto-stop bot
-  useEffect(() => {
-    if (localBotState && !isOnline && localBotState.isRunning) {
-      // Internet connection lost while bot was running - stop the bot for both modes
-      console.log('Internet connection lost - stopping bot automatically (both simulation and live modes require real market data)')
-      const stopBotDueToConnectionLoss = async () => {
-        try {
-          // Stop the bot locally first to update UI immediately
-          const updatedState = { ...localBotState, isRunning: false }
-          setLocalBotState(updatedState)
-          
-          // Try to stop the bot via Tauri if possible
-          try {
-            await stopBotLocal()
-            console.log('Bot successfully stopped due to internet connection loss')
-          } catch (taruiError) {
-            console.warn('Could not stop bot via Tauri, but local state updated:', taruiError)
-          }
-        } catch (error) {
-          console.error('Failed to handle internet connection loss:', error)
-        }
-      }
-      stopBotDueToConnectionLoss()
-    }
-  }, [isOnline, localBotState?.mode, localBotState?.isRunning, localBotState])
-
-  // Update local state when connection status changes (for re-rendering)
-  useEffect(() => {
-    // This effect is just to trigger re-renders when internet connectivity changes
-    // The actual logic is handled in the component functions
-  }, [isOnline, localBotState?.mode])
-
-  // Sync local state with server when connection is restored
-  useEffect(() => {
-    if (isConnected && localBotState && socket?.connected) {
-      // Sync any local changes made while offline
-      try {
-        socket.emit('sync_bot_state', {
-          isRunning: localBotState.isRunning,
-          mode: localBotState.mode,
-          safeMode: localBotState.safeMode,
-          sessionTrades: localBotState.sessionTrades,
-          sessionProfit: localBotState.sessionProfit
-        })
-        console.log('Bot state synced with server after reconnection:', {
-          mode: localBotState.mode,
-          isRunning: localBotState.isRunning,
-          safeMode: localBotState.safeMode
-        })
-      } catch (error) {
-        console.warn('Failed to sync bot state with server:', error)
-      }
-    }
-  }, [isConnected, localBotState, socket])
-
-  // Update local state when server status changes (for live mode)
-  useEffect(() => {
-    if (localBotState && isConnected && localBotState.mode === 'live') {
-      // In live mode when connected, only sync the running status from server
-      // Keep mode and safeMode from local state (which comes from .env)
-      if (status.isRunning !== localBotState.isRunning) {
-        
-        const syncedState = {
-          ...localBotState,
-          isRunning: status.isRunning,
-          // Don't override mode and safeMode - keep local values from .env
-        }
-        
-        // Only update if there's actually a change to prevent loops
-        console.log('Local running status synced with server:', { 
-          isRunning: status.isRunning, 
-          keepingLocalMode: localBotState.mode,
-          keepingLocalSafeMode: localBotState.safeMode 
-        })
-        setLocalBotState(syncedState)
-      }
-    }
-  }, [status.isRunning, localBotState?.mode, localBotState?.isRunning, isConnected])
-
-  // Get effective bot status (prioritize local state when available)
-  const effectiveBotStatus = (() => {
-    if (localBotState) {
-      // Use local state when available
-      let effectiveIsRunning = localBotState.isRunning
-      
-      // Both simulation and live modes require internet connection for real market data
-      if (!isOnline) {
-        effectiveIsRunning = false
-      }
-      
-      return {
-        ...status,
-        isRunning: effectiveIsRunning,
-        mode: localBotState.mode,
-        safeMode: localBotState.safeMode
-      }
-    }
-    // Fall back to server status only when local state is not available
-    return status
-  })()
-
-  // Determine if controls should be enabled based on mode and connection
-  const canControlBot = (() => {
-    if (!localBotState) return false // Can't control if we don't know the state
-    
-    // Both simulation and live modes require internet connection for real market data
-    return isOnline
-  })()
-
-  // Handle bot start with mode awareness
-  const handleStart = async () => {
-    if (!localBotState) return
-    
-    if (!isOnline) {
-      // Both modes require internet connection for real market data
-      console.warn('Cannot start bot without internet connection - both simulation and live modes require real market data')
-      return
-    }
-    
-    if (localBotState.mode === 'simulation') {
-      // Simulation mode: use local control (real data, no actual trades)
-      const result = await startBotLocal()
-      if (result.success) {
-        const updatedState = { ...localBotState, isRunning: true, lastStartTime: Date.now() }
-        setLocalBotState(updatedState)
-      }
-    } else if (localBotState.mode === 'live') {
-      // Live mode: use server control when online, but also update local state optimistically
-      try {
-        // Optimistically update local state for immediate UI feedback
-        const optimisticState = { ...localBotState, isRunning: true, lastStartTime: Date.now() }
-        setLocalBotState(optimisticState)
-        
-        // Call server function
-        onStart()
-        
-        console.log('Bot start initiated for live mode')
-      } catch (error) {
-        console.error('Failed to start bot in live mode:', error)
-        // Revert optimistic update on error
-        setLocalBotState(localBotState)
-      }
-    }
+  // Simple handler functions that delegate to App component
+  const handleStart = () => {
+    console.log('Home: Start button clicked, calling onStart')
+    onStart()
   }
 
-  // Handle bot stop with mode awareness
-  const handleStop = async () => {
-    if (!localBotState) return
-    
-    if (localBotState.mode === 'simulation') {
-      // Simulation mode: always use local control
-      const result = await stopBotLocal()
-      if (result.success) {
-        const updatedState = { ...localBotState, isRunning: false }
-        setLocalBotState(updatedState)
-      }
-    } else if (isOnline) {
-      // Live mode: use server control when online, but also update local state optimistically
-      try {
-        // Optimistically update local state for immediate UI feedback
-        const optimisticState = { ...localBotState, isRunning: false }
-        setLocalBotState(optimisticState)
-        
-        // Call server function
-        onStop()
-        
-        console.log('Bot stop initiated for live mode')
-      } catch (error) {
-        console.error('Failed to stop bot in live mode:', error)
-        // Revert optimistic update on error
-        setLocalBotState(localBotState)
-      }
-    } else {
-      // When offline: force stop locally for both modes
-      const updatedState = { ...localBotState, isRunning: false }
-      setLocalBotState(updatedState)
-    }
+  const handleStop = () => {
+    console.log('Home: Stop button clicked, calling onStop')
+    onStop()
   }
 
-  // Handle safe mode toggle with mode awareness
-  const handleToggleSafeMode = async () => {
-    if (!localBotState) return
-    
-    if (!isOnline) {
-      // When offline: always use local control
-      const result = await toggleSafeMode()
-      if (result.success) {
-        const updatedState = { ...localBotState, safeMode: result.newSafeMode }
-        setLocalBotState(updatedState)
-      }
-    } else {
-      // When online: use local control first, then notify server
-      try {
-        // Update local state first (this updates .env file)
-        const result = await toggleSafeMode()
-        if (result.success) {
-          const updatedState = { ...localBotState, safeMode: result.newSafeMode }
-          setLocalBotState(updatedState)
-          
-          // Then notify server of the change
-          onToggleSafeMode()
-          
-          console.log('Safe mode toggle completed:', result.newSafeMode)
-        }
-      } catch (error) {
-        console.error('Failed to toggle safe mode:', error)
-      }
-    }
+  const handleToggleSafeMode = () => {
+    console.log('Home: Safe mode toggle clicked, calling onToggleSafeMode')
+    onToggleSafeMode()
   }
+
+  // Use status directly from App
+  console.log('Home: Current status from App:', status)
   const cardStyle = {
     backgroundColor: '#1A1F2E',
     border: '1px solid #2D3748',
@@ -330,7 +69,8 @@ const Home = ({
     transition: 'all 0.2s ease'
   }
 
-  const successRate = status.totalTrades > 0 ? Math.round(((status.totalTrades - opportunities.length) / status.totalTrades) * 100) : 95
+  const successRate = monitoringStats.totalOpportunitiesFound > 0 ? 
+    Math.round((monitoringStats.opportunitiesExecuted / monitoringStats.totalOpportunitiesFound) * 100) : 0
 
   return (
     <div style={{ padding: '0 8px' }}>
@@ -344,83 +84,126 @@ const Home = ({
         </p>
       </div>
 
-      {/* Top Stats Cards */}
+      {/* Monitoring Dashboard - Order matches backend print_dashboard */}
       <div style={{ 
         display: 'grid', 
         gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', 
         gap: '20px',
         marginBottom: '32px'
       }}>
-        {/* Portfolio Value */}
+        {/* Uptime */}
         <div style={smallCardStyle}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <p style={{ color: '#9CA3AF', fontSize: '14px', margin: '0 0 4px 0' }}>Portfolio Value</p>
+              <p style={{ color: '#9CA3AF', fontSize: '14px', margin: '0 0 4px 0' }}>Uptime</p>
               <p style={{ fontSize: '28px', fontWeight: '700', margin: 0, color: '#ffffff' }}>
-                ${portfolio.totalValue.toLocaleString()}
+                {typeof monitoringStats.uptime === 'string' ? monitoringStats.uptime : `${Math.floor(monitoringStats.uptime / 3600)}h ${Math.floor((monitoringStats.uptime % 3600) / 60)}m`}
               </p>
-              <p style={{ 
-                fontSize: '14px', 
-                margin: '4px 0 0 0',
-                color: portfolio.profitPercentage >= 0 ? '#00D4AA' : '#FF6B6B'
-              }}>
-                {portfolio.profitPercentage >= 0 ? '+' : ''}{portfolio.profitPercentage}% 
-                (${portfolio.totalProfit.toLocaleString()})
+              <p style={{ fontSize: '14px', margin: '4px 0 0 0', color: '#9CA3AF' }}>
+                Session duration
               </p>
             </div>
-            <div style={{ 
-              backgroundColor: '#00D4AA20', 
-              borderRadius: '12px', 
-              padding: '12px',
-              color: '#00D4AA'
-            }}>
-              <DollarSign size={24} />
+            <div style={{ backgroundColor: '#6366F120', borderRadius: '12px', padding: '12px', color: '#6366F1' }}>
+              <Clock size={24} />
             </div>
           </div>
         </div>
-
-        {/* Total Trades */}
+        {/* Loop Count */}
         <div style={smallCardStyle}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <p style={{ color: '#9CA3AF', fontSize: '14px', margin: '0 0 4px 0' }}>Total Trades</p>
+              <p style={{ color: '#9CA3AF', fontSize: '14px', margin: '0 0 4px 0' }}>Loops Completed</p>
               <p style={{ fontSize: '28px', fontWeight: '700', margin: 0, color: '#ffffff' }}>
-                {status.totalTrades.toLocaleString()}
-              </p>
-              <p style={{ fontSize: '14px', margin: '4px 0 0 0', color: '#00D4AA' }}>
-                24h volume: $2.4M
+                {monitoringStats.loopCount.toLocaleString()}
               </p>
             </div>
-            <div style={{ 
-              backgroundColor: '#4F46E520', 
-              borderRadius: '12px', 
-              padding: '12px',
-              color: '#4F46E5'
-            }}>
+            <div style={{ backgroundColor: '#3B82F620', borderRadius: '12px', padding: '12px', color: '#3B82F6' }}>
+              <Activity size={24} />
+            </div>
+          </div>
+        </div>
+        {/* Avg Execution Time */}
+        <div style={smallCardStyle}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <p style={{ color: '#9CA3AF', fontSize: '14px', margin: '0 0 4px 0' }}>Avg Execution Time</p>
+              <p style={{ fontSize: '28px', fontWeight: '700', margin: 0, color: '#ffffff' }}>
+                {monitoringStats.avgExecutionTime?.toFixed(1) ?? '0.0'}s
+              </p>
+              <p style={{ fontSize: '14px', margin: '4px 0 0 0', color: '#9CA3AF' }}>
+                Per loop
+              </p>
+            </div>
+            <div style={{ backgroundColor: '#3B82F620', borderRadius: '12px', padding: '12px', color: '#3B82F6' }}>
+              <Activity size={24} />
+            </div>
+          </div>
+        </div>
+        {/* Opportunities Found */}
+        <div style={smallCardStyle}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <p style={{ color: '#9CA3AF', fontSize: '14px', margin: '0 0 4px 0' }}>Opportunities Found</p>
+              <p style={{ fontSize: '28px', fontWeight: '700', margin: 0, color: '#ffffff' }}>
+                {monitoringStats.totalOpportunitiesFound}
+              </p>
+              <p style={{ fontSize: '14px', margin: '4px 0 0 0', color: '#9CA3AF' }}>
+                This session
+              </p>
+            </div>
+            <div style={{ backgroundColor: '#8B5CF620', borderRadius: '12px', padding: '12px', color: '#8B5CF6' }}>
               <Target size={24} />
             </div>
           </div>
         </div>
-
-        {/* Success Rate */}
+        {/* Opportunities Executed */}
         <div style={smallCardStyle}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <p style={{ color: '#9CA3AF', fontSize: '14px', margin: '0 0 4px 0' }}>Success Rate</p>
+              <p style={{ color: '#9CA3AF', fontSize: '14px', margin: '0 0 4px 0' }}>Opportunities Executed</p>
               <p style={{ fontSize: '28px', fontWeight: '700', margin: 0, color: '#ffffff' }}>
-                {successRate}%
+                {monitoringStats.opportunitiesExecuted}
               </p>
-              <p style={{ fontSize: '14px', margin: '4px 0 0 0', color: '#9CA3AF' }}>
-                Last 30 days
+              <p style={{ fontSize: '14px', margin: '4px 0 0 0', color: '#00D4AA' }}>
+                ${monitoringStats.totalProfitUsd?.toFixed(2) ?? '0.00'} profit
               </p>
             </div>
-            <div style={{ 
-              backgroundColor: '#F59E0B20', 
-              borderRadius: '12px', 
-              padding: '12px',
-              color: '#F59E0B'
-            }}>
-              <Activity size={24} />
+            <div style={{ backgroundColor: '#00D4AA20', borderRadius: '12px', padding: '12px', color: '#00D4AA' }}>
+              <BarChart3 size={24} />
+            </div>
+          </div>
+        </div>
+        {/* Opportunities Per Hour */}
+        <div style={smallCardStyle}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <p style={{ color: '#9CA3AF', fontSize: '14px', margin: '0 0 4px 0' }}>Opportunities/Hour</p>
+              <p style={{ fontSize: '28px', fontWeight: '700', margin: 0, color: '#ffffff' }}>
+                {monitoringStats.opportunitiesPerHour?.toFixed(1) ?? '0.0'}
+              </p>
+              <p style={{ fontSize: '14px', margin: '4px 0 0 0', color: '#9CA3AF' }}>
+                Current rate
+              </p>
+            </div>
+            <div style={{ backgroundColor: '#F59E0B20', borderRadius: '12px', padding: '12px', color: '#F59E0B' }}>
+              <TrendingUp size={24} />
+            </div>
+          </div>
+        </div>
+        {/* Errors */}
+        <div style={smallCardStyle}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <p style={{ color: '#9CA3AF', fontSize: '14px', margin: '0 0 4px 0' }}>Errors</p>
+              <p style={{ fontSize: '28px', fontWeight: '700', margin: 0, color: monitoringStats.errors > 0 ? '#FF6B6B' : '#00D4AA' }}>
+                {monitoringStats.errors}
+              </p>
+              <p style={{ fontSize: '14px', margin: '4px 0 0 0', color: '#9CA3AF' }}>
+                Total errors
+              </p>
+            </div>
+            <div style={{ backgroundColor: '#FF6B6B20', borderRadius: '12px', padding: '12px', color: '#FF6B6B' }}>
+              <AlertCircle size={24} />
             </div>
           </div>
         </div>
@@ -442,51 +225,29 @@ const Home = ({
                 <div style={{ 
                   padding: '4px 12px', 
                   borderRadius: '20px', 
-                  backgroundColor: effectiveBotStatus.mode === 'simulation' ? '#4F46E520' : '#F59E0B20',
-                  color: effectiveBotStatus.mode === 'simulation' ? '#4F46E5' : '#F59E0B',
+                  backgroundColor: status.mode === 'simulation' ? '#4F46E520' : '#F59E0B20',
+                  color: status.mode === 'simulation' ? '#4F46E5' : '#F59E0B',
                   fontSize: '12px',
                   fontWeight: '600'
                 }}>
-                  {effectiveBotStatus.mode === 'simulation' ? 'SIMULATION' : 'LIVE TRADING'}
+                  {status.mode === 'simulation' ? 'SIMULATION' : 'LIVE TRADING'}
                 </div>
                 {/* Status indicator */}
                 <div style={{ 
                   padding: '4px 12px', 
                   borderRadius: '20px', 
-                  backgroundColor: effectiveBotStatus.isRunning ? '#00D4AA20' : '#FF6B6B20',
-                  color: effectiveBotStatus.isRunning ? '#00D4AA' : '#FF6B6B',
+                  backgroundColor: status.isRunning ? '#00D4AA20' : '#FF6B6B20',
+                  color: status.isRunning ? '#00D4AA' : '#FF6B6B',
                   fontSize: '12px',
                   fontWeight: '600'
                 }}>
-                  {effectiveBotStatus.isRunning ? 'ACTIVE' : 'INACTIVE'}
+                  {status.isRunning ? 'ACTIVE' : 'INACTIVE'}
                 </div>
               </div>
             </div>
 
-            {/* Connection status warning for both modes */}
-            {!isOnline && (
-              <div style={{
-                padding: '12px',
-                borderRadius: '8px',
-                backgroundColor: '#FF6B6B20',
-                border: '1px solid #FF6B6B',
-                marginBottom: '16px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}>
-                <WifiOff size={16} style={{ color: '#FF6B6B' }} />
-                <span style={{ color: '#FF6B6B', fontSize: '14px', fontWeight: '500' }}>
-                  {localBotState?.isRunning ? 
-                    'Internet connection lost - bot automatically stopped. Both simulation and live modes require real market data.' :
-                    'Internet connection required. Both simulation and live modes need real market data to operate.'
-                  }
-                </span>
-              </div>
-            )}
-
-            {/* Simulation mode indicator - shown when online */}
-            {effectiveBotStatus.mode === 'simulation' && isOnline && (
+            {/* Simulation mode indicator */}
+            {status.mode === 'simulation' && (
               <div style={{
                 padding: '12px',
                 borderRadius: '8px',
@@ -506,66 +267,56 @@ const Home = ({
             
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
               <button
-                onClick={effectiveBotStatus.isRunning ? handleStop : handleStart}
-                disabled={!canControlBot}
+                onClick={status.isRunning ? handleStop : handleStart}
                 style={{
                   ...buttonStyle,
-                  backgroundColor: canControlBot 
-                    ? (effectiveBotStatus.isRunning ? '#FF6B6B' : '#00D4AA')
-                    : '#6B7280',
+                  backgroundColor: status.isRunning ? '#FF6B6B' : '#00D4AA',
                   color: '#ffffff',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px',
-                  justifyContent: 'center',
-                  opacity: canControlBot ? 1 : 0.5,
-                  cursor: canControlBot ? 'pointer' : 'not-allowed'
+                  justifyContent: 'center'
                 }}
               >
-                {effectiveBotStatus.isRunning ? <Square size={16} /> : <Play size={16} />}
-                {effectiveBotStatus.isRunning ? 'Stop Bot' : 'Start Bot'}
+                {status.isRunning ? <Square size={16} /> : <Play size={16} />}
+                {status.isRunning ? 'Stop Bot' : 'Start Bot'}
               </button>
               
               {/* Mode Toggle Button */}
               <button
                 onClick={onToggleMode}
-                disabled={effectiveBotStatus.isRunning}
+                disabled={status.isRunning}
                 style={{
                   ...buttonStyle,
-                  backgroundColor: effectiveBotStatus.isRunning ? '#6B7280' : 
-                    (effectiveBotStatus.mode === 'simulation' ? '#4F46E5' : '#F59E0B'),
+                  backgroundColor: status.isRunning ? '#6B7280' : 
+                    (status.mode === 'simulation' ? '#4F46E5' : '#F59E0B'),
                   color: '#ffffff',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px',
                   justifyContent: 'center',
-                  opacity: effectiveBotStatus.isRunning ? 0.5 : 1,
-                  cursor: effectiveBotStatus.isRunning ? 'not-allowed' : 'pointer'
+                  opacity: status.isRunning ? 0.5 : 1,
+                  cursor: status.isRunning ? 'not-allowed' : 'pointer'
                 }}
               >
                 <Activity size={16} />
-                {effectiveBotStatus.mode === 'simulation' ? 'Simulation Mode' : 'Live Trading'}
+                {status.mode === 'simulation' ? 'Simulation Mode' : 'Live Trading'}
               </button>
               
               <button
                 onClick={handleToggleSafeMode}
-                disabled={!canControlBot}
                 style={{
                   ...buttonStyle,
-                  backgroundColor: canControlBot 
-                    ? (effectiveBotStatus.safeMode ? '#10B981' : '#6B7280')
-                    : '#6B7280',
+                  backgroundColor: status.safeMode ? '#10B981' : '#6B7280',
                   color: '#ffffff',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px',
-                  justifyContent: 'center',
-                  opacity: canControlBot ? 1 : 0.5,
-                  cursor: canControlBot ? 'pointer' : 'not-allowed'
+                  justifyContent: 'center'
                 }}
               >
                 <Shield size={16} />
-                {effectiveBotStatus.safeMode ? 'Safe Mode ON' : 'Safe Mode OFF'}
+                {status.safeMode ? 'Safe Mode ON' : 'Safe Mode OFF'}
               </button>
             </div>
           </div>
@@ -574,46 +325,27 @@ const Home = ({
           <div style={cardStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <h3 style={{ fontSize: '20px', fontWeight: '600', margin: 0, color: '#ffffff' }}>
-                {effectiveBotStatus.mode === 'simulation' ? 'Simulated' : 'Live'} Arbitrage Opportunities
+                {status.mode === 'simulation' ? 'Simulated' : 'Live'} Arbitrage Opportunities
               </h3>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                {/* Internet connection status */}
+                {/* Connection status indicator - simplified */}
                 <div style={{ 
                   padding: '4px 12px', 
                   borderRadius: '20px', 
-                  backgroundColor: isOnline ? '#00D4AA20' : '#FF6B6B20',
-                  color: isOnline ? '#00D4AA' : '#FF6B6B',
+                  backgroundColor: '#00D4AA20',
+                  color: '#00D4AA',
                   fontSize: '12px',
                   fontWeight: '600',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px'
                 }}>
-                  {isOnline ? <Wifi size={12} /> : <WifiOff size={12} />}
-                  {isOnline ? 'ONLINE' : 'OFFLINE'}
+                  <Wifi size={12} />
+                  ONLINE
                 </div>
               </div>
             </div>
 
-            {/* Mode-specific messaging */}
-            {!isOnline && (
-              <div style={{
-                padding: '12px',
-                borderRadius: '8px',
-                backgroundColor: '#FF6B6B20',
-                border: '1px solid #FF6B6B',
-                marginBottom: '16px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}>
-                <AlertCircle size={16} style={{ color: '#FF6B6B' }} />
-                <span style={{ color: '#FF6B6B', fontSize: '14px' }}>
-                  Internet connection required. Both simulation and live modes need real market data to function.
-                </span>
-              </div>
-            )}
-            
             {opportunities.length === 0 ? (
               <div style={{ 
                 textAlign: 'center', 
@@ -623,10 +355,7 @@ const Home = ({
                 <BarChart3 size={48} style={{ margin: '0 auto 16px', opacity: 0.5 }} />
                 <p style={{ margin: 0, fontSize: '16px' }}>No opportunities found</p>
                 <p style={{ margin: '8px 0 0 0', fontSize: '14px' }}>
-                  {isOnline 
-                    ? `Scanning for real ${effectiveBotStatus.mode === 'simulation' ? 'market data (simulation mode)' : 'arbitrage opportunities (live mode)'}...`
-                    : 'Internet connection required for both simulation and live modes to access real market data'
-                  }
+                  Scanning for {status.mode === 'simulation' ? 'simulated' : 'live'} arbitrage opportunities...
                 </p>
               </div>
             ) : (
@@ -644,14 +373,14 @@ const Home = ({
                   </thead>
                   <tbody>
                     {opportunities.slice(0, 10).map((opportunity) => {
-                      // Determine if execution is allowed
-                      const canExecute = effectiveBotStatus.isRunning && isOnline  // Both modes need internet + bot running
+                      // Determine if execution is allowed - bot must be running
+                      const canExecute = status.isRunning
                       
                       return (
                         <tr key={opportunity.id} style={{ borderBottom: '1px solid #2D3748' }}>
                           <td style={{ padding: '12px', fontWeight: '600', color: '#ffffff' }}>
                             {opportunity.pair}
-                            {effectiveBotStatus.mode === 'simulation' && (
+                            {status.mode === 'simulation' && (
                               <span style={{ 
                                 marginLeft: '8px', 
                                 fontSize: '10px', 
@@ -700,13 +429,11 @@ const Home = ({
                               }}
                               title={
                                 !canExecute 
-                                  ? !isOnline 
-                                    ? 'Requires internet connection for real market data'
-                                    : 'Bot must be running to execute trades'
-                                  : `Execute ${effectiveBotStatus.mode === 'simulation' ? 'simulated' : 'live'} trade`
+                                  ? 'Bot must be running to execute trades'
+                                  : `Execute ${status.mode === 'simulation' ? 'simulated' : 'live'} trade`
                               }
                             >
-                              {effectiveBotStatus.mode === 'simulation' ? 'Simulate' : 'Execute'}
+                              {status.mode === 'simulation' ? 'Simulate' : 'Execute'}
                             </button>
                           </td>
                         </tr>
@@ -844,6 +571,110 @@ const Home = ({
 
         {/* Right Column - Portfolio & Stats */}
         <div>
+          {/* Monitoring Dashboard */}
+          <div style={cardStyle}>
+            <h3 style={{ fontSize: '20px', fontWeight: '600', margin: '0 0 20px 0', color: '#ffffff' }}>
+              Real-Time Monitoring
+            </h3>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Activity size={16} style={{ color: '#9CA3AF' }} />
+                  <span style={{ color: '#9CA3AF' }}>Bot Status</span>
+                </div>
+                <span style={{ 
+                  color: status.isRunning ? '#00D4AA' : '#FF6B6B', 
+                  fontWeight: '600',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}>
+                  <div style={{ 
+                    width: '8px', 
+                    height: '8px', 
+                    borderRadius: '50%', 
+                    backgroundColor: status.isRunning ? '#00D4AA' : '#FF6B6B' 
+                  }} />
+                  {status.isRunning ? 'Running' : 'Stopped'}
+                </span>
+              </div>
+              
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Shield size={16} style={{ color: '#9CA3AF' }} />
+                  <span style={{ color: '#9CA3AF' }}>Mode</span>
+                </div>
+                <span style={{ 
+                  color: status.mode === 'simulation' ? '#4F46E5' : '#F59E0B', 
+                  fontWeight: '600',
+                  textTransform: 'capitalize'
+                }}>
+                  {status.mode}
+                </span>
+              </div>
+              
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Target size={16} style={{ color: '#9CA3AF' }} />
+                  <span style={{ color: '#9CA3AF' }}>Safe Mode</span>
+                </div>
+                <span style={{ 
+                  color: status.safeMode ? '#00D4AA' : '#FF6B6B', 
+                  fontWeight: '600'
+                }}>
+                  {status.safeMode ? 'ON' : 'OFF'}
+                </span>
+              </div>
+              
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <BarChart3 size={16} style={{ color: '#9CA3AF' }} />
+                  <span style={{ color: '#9CA3AF' }}>Errors</span>
+                </div>
+                <span style={{ 
+                  color: monitoringStats.errors > 0 ? '#FF6B6B' : '#00D4AA', 
+                  fontWeight: '600'
+                }}>
+                  {monitoringStats.errors}
+                </span>
+              </div>
+
+              {monitoringStats.bestOpportunity && (
+                <div style={{ 
+                  padding: '12px',
+                  backgroundColor: '#0D1421',
+                  borderRadius: '8px',
+                  border: '1px solid #2D3748',
+                  marginTop: '8px'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <span style={{ color: '#9CA3AF', fontSize: '14px' }}>Best Opportunity</span>
+                    <span style={{ color: '#00D4AA', fontSize: '12px' }}>
+                      {new Date(monitoringStats.bestOpportunity.time).toLocaleTimeString()}
+                    </span>
+                  </div>
+                  <div style={{ color: '#ffffff', fontWeight: '600', fontSize: '14px', marginBottom: '4px' }}>
+                    {monitoringStats.bestOpportunity.pair}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ color: '#9CA3AF', fontSize: '12px' }}>
+                      {monitoringStats.bestOpportunity.buyDex} → {monitoringStats.bestOpportunity.sellDex}
+                    </span>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ color: '#00D4AA', fontSize: '12px', fontWeight: '600' }}>
+                        +${monitoringStats.bestOpportunity.profitUsd.toFixed(2)}
+                      </div>
+                      <div style={{ color: '#9CA3AF', fontSize: '11px' }}>
+                        {monitoringStats.bestOpportunity.profitPct.toFixed(2)}%
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Portfolio Assets */}
           <div style={cardStyle}>
             <h3 style={{ fontSize: '20px', fontWeight: '600', margin: '0 0 20px 0', color: '#ffffff' }}>
@@ -908,19 +739,31 @@ const Home = ({
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Clock size={16} style={{ color: '#9CA3AF' }} />
-                  <span style={{ color: '#9CA3AF' }}>Uptime</span>
+                  <span style={{ color: '#9CA3AF' }}>Session Start</span>
                 </div>
                 <span style={{ color: '#ffffff', fontWeight: '600' }}>
-                  {Math.floor(status.uptime / 3600)}h {Math.floor((status.uptime % 3600) / 60)}m
+                  {new Date(monitoringStats.startTime).toLocaleTimeString()}
                 </span>
               </div>
               
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Users size={16} style={{ color: '#9CA3AF' }} />
-                  <span style={{ color: '#9CA3AF' }}>Active Exchanges</span>
+                  <span style={{ color: '#9CA3AF' }}>Current Opportunities</span>
                 </div>
-                <span style={{ color: '#ffffff', fontWeight: '600' }}>12</span>
+                <span style={{ color: '#ffffff', fontWeight: '600' }}>
+                  {opportunities.length}
+                </span>
+              </div>
+              
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <BarChart3 size={16} style={{ color: '#9CA3AF' }} />
+                  <span style={{ color: '#9CA3AF' }}>Errors</span>
+                </div>
+                <span style={{ color: monitoringStats.errors > 0 ? '#FF6B6B' : '#ffffff', fontWeight: '600' }}>
+                  {monitoringStats.errors}
+                </span>
               </div>
               
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -929,7 +772,7 @@ const Home = ({
                   <span style={{ color: '#9CA3AF' }}>Total Profit</span>
                 </div>
                 <span style={{ color: '#00D4AA', fontWeight: '600' }}>
-                  ${status.totalProfit.toFixed(2)}
+                  ${monitoringStats.totalProfitUsd.toFixed(2)}
                 </span>
               </div>
             </div>
