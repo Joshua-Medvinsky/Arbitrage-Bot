@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 import requests
 from eth_account import Account
 from eth_account.messages import encode_defunct
+from web3.types import TxParams
 
 load_dotenv()
 
@@ -79,11 +80,6 @@ async def handle_event(event):
         except Exception as e:
             print(f"Error handling log: {e}")
 
-# --- Placeholder: Send Backrun Bundle ---
-async def try_backrun(start_pair, end_pair, tx_hash):
-    print(f"Would backrun: {start_pair} <-> {end_pair} after {tx_hash}")
-    # TODO: Implement bundle creation and sending via Flashbots/MEV-Share
-    # See: https://docs.flashbots.net/flashbots-mev-share/searchers/tutorials/flash-loan-arbitrage/bot
 
 w3 = Web3(Web3.HTTPProvider(os.getenv("WEB3_PROVIDER")))
 
@@ -114,28 +110,29 @@ async def try_backrun(start_pair, end_pair, tx_hash):
     values_first = [start_pair, end_pair, PERCENTAGE_TO_KEEP]
     values_second = [end_pair, start_pair, PERCENTAGE_TO_KEEP]
 
-    params_first = w3.codec.encode_abi(types, values_first)
-    params_second = w3.codec.encode_abi(types, values_second)
+    params_first = encode_abi(types, values_first)
+    params_second = encode_abi(types, values_second)
 
-    # Build transactions
+    # Only include valid fields for build_transaction
     tx_opts = {
-        'from': account.address,
-        'gas': GAS_LIMIT,
-        'gasPrice': gas_price,
-        'nonce': nonce,
+        'gas': int(GAS_LIMIT),
+        'gasPrice': int(gas_price),
+        'nonce': int(nonce),
     }
+    tx_opts2 = tx_opts.copy()
+    tx_opts2['nonce'] = int(nonce) + 1
 
     tx1 = contract.functions.makeFlashLoan(
         WETH_ADDRESS,
-        10**21,  # 1000 WETH, adjust as needed
+        10**21,
         params_first
-    ).build_transaction(tx_opts)
+    ).build_transaction(TxParams(tx_opts))  # type: ignore
 
     tx2 = contract.functions.makeFlashLoan(
         WETH_ADDRESS,
         10**21,
         params_second
-    ).build_transaction({**tx_opts, 'nonce': nonce + 1})
+    ).build_transaction(TxParams(tx_opts2))  # type: ignore
 
     # Sign transactions
     signed_tx1 = w3.eth.account.sign_transaction(tx1, private_key=PRIVATE_KEY)
