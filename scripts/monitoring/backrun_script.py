@@ -3,7 +3,7 @@ import aiohttp
 import json
 import os
 from web3 import Web3
-from eth_abi import encode_abi
+from eth_abi.codec import encode_abi
 from dotenv import load_dotenv
 import requests
 from eth_account import Account
