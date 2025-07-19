@@ -12,6 +12,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
+    "tauri:dev-no-watch": "tauri dev --no-watch",
     "tauri:build": "tauri build",
     "mobile:dev": "cap run android",
     "mobile:build": "npm run build && cap copy && cap open android",

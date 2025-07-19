@@ -1,5 +1,5 @@
 import { ArbitrageOpportunity, BotStatus, Portfolio, LogEntry, MonitoringStats } from '../App'
-import { TrendingUp, Activity, DollarSign, Target, Shield, Play, Square, BarChart3, Clock, Users, ScrollText, AlertCircle, CheckCircle, Info, XCircle, Wifi } from 'lucide-react'
+import { TrendingUp, Activity, DollarSign, Target, Shield, Play, Square, BarChart3, Clock, Users, ScrollText, AlertCircle, CheckCircle, Info, XCircle, Wifi, ArrowRightLeft, Coins, History } from 'lucide-react'
 
 interface HomeProps {
   opportunities: ArbitrageOpportunity[]
@@ -204,6 +204,39 @@ const Home = ({
             </div>
             <div style={{ backgroundColor: '#FF6B6B20', borderRadius: '12px', padding: '12px', color: '#FF6B6B' }}>
               <AlertCircle size={24} />
+            </div>
+          </div>
+        </div>
+        {/* Best Opportunity */}
+        <div style={smallCardStyle}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ flex: 1 }}>
+              <p style={{ color: '#9CA3AF', fontSize: '14px', margin: '0 0 4px 0' }}>Best Opportunity</p>
+              {monitoringStats.bestOpportunity ? (
+                <>
+                  <p style={{ fontSize: '24px', fontWeight: '700', margin: 0, color: '#00D4AA' }}>
+                    ${monitoringStats.bestOpportunity.profitUsd.toFixed(2)}
+                  </p>
+                  <p style={{ fontSize: '14px', margin: '4px 0 0 0', color: '#9CA3AF' }}>
+                    {monitoringStats.bestOpportunity.pair} ({monitoringStats.bestOpportunity.profitPct.toFixed(2)}%)
+                  </p>
+                  <p style={{ fontSize: '12px', margin: '2px 0 0 0', color: '#6B7280' }}>
+                    {monitoringStats.bestOpportunity.buyDex} → {monitoringStats.bestOpportunity.sellDex}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p style={{ fontSize: '24px', fontWeight: '700', margin: 0, color: '#6B7280' }}>
+                    No data
+                  </p>
+                  <p style={{ fontSize: '14px', margin: '4px 0 0 0', color: '#9CA3AF' }}>
+                    Waiting for opportunities
+                  </p>
+                </>
+              )}
+            </div>
+            <div style={{ backgroundColor: '#10B98120', borderRadius: '12px', padding: '12px', color: '#10B981' }}>
+              <TrendingUp size={24} />
             </div>
           </div>
         </div>
@@ -772,10 +805,169 @@ const Home = ({
                   <span style={{ color: '#9CA3AF' }}>Total Profit</span>
                 </div>
                 <span style={{ color: '#00D4AA', fontWeight: '600' }}>
-                  ${monitoringStats.totalProfitUsd.toFixed(2)}
+                  ${monitoringStats.totalProfitUsd?.toFixed(2) ?? '0.00'}
                 </span>
               </div>
             </div>
+          </div>
+
+          {/* Top DEX Routes */}
+          <div style={cardStyle}>
+            <h3 style={{ fontSize: '20px', fontWeight: '600', margin: '0 0 20px 0', color: '#ffffff' }}>
+              Top DEX Routes
+            </h3>
+            
+            {monitoringStats.topDexRoutes && monitoringStats.topDexRoutes.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {monitoringStats.topDexRoutes.map((route, index) => (
+                  <div key={index} style={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-between', 
+                    alignItems: 'center',
+                    padding: '12px',
+                    backgroundColor: '#0D1421',
+                    borderRadius: '8px',
+                    border: '1px solid #2D3748'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <ArrowRightLeft size={16} style={{ color: '#4F46E5' }} />
+                      <span style={{ color: '#ffffff', fontSize: '14px' }}>{route.route}</span>
+                    </div>
+                    <span style={{ 
+                      color: '#00D4AA', 
+                      fontWeight: '600',
+                      fontSize: '14px'
+                    }}>
+                      {route.count}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ 
+                textAlign: 'center', 
+                padding: '20px',
+                color: '#9CA3AF'
+              }}>
+                <ArrowRightLeft size={32} style={{ margin: '0 auto 8px', opacity: 0.5 }} />
+                <p style={{ margin: 0, fontSize: '14px' }}>No routes tracked yet</p>
+              </div>
+            )}
+          </div>
+
+          {/* Top Pairs */}
+          <div style={cardStyle}>
+            <h3 style={{ fontSize: '20px', fontWeight: '600', margin: '0 0 20px 0', color: '#ffffff' }}>
+              Top Trading Pairs
+            </h3>
+            
+            {monitoringStats.topPairs && monitoringStats.topPairs.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {monitoringStats.topPairs.map((pairData, index) => (
+                  <div key={index} style={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-between', 
+                    alignItems: 'center',
+                    padding: '12px',
+                    backgroundColor: '#0D1421',
+                    borderRadius: '8px',
+                    border: '1px solid #2D3748'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Coins size={16} style={{ color: '#F59E0B' }} />
+                      <span style={{ color: '#ffffff', fontSize: '14px', fontWeight: '500' }}>
+                        {pairData.pair}
+                      </span>
+                    </div>
+                    <span style={{ 
+                      color: '#00D4AA', 
+                      fontWeight: '600',
+                      fontSize: '14px'
+                    }}>
+                      {pairData.count}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ 
+                textAlign: 'center', 
+                padding: '20px',
+                color: '#9CA3AF'
+              }}>
+                <Coins size={32} style={{ margin: '0 auto 8px', opacity: 0.5 }} />
+                <p style={{ margin: 0, fontSize: '14px' }}>No pairs tracked yet</p>
+              </div>
+            )}
+          </div>
+
+          {/* Recent Opportunities */}
+          <div style={cardStyle}>
+            <h3 style={{ fontSize: '20px', fontWeight: '600', margin: '0 0 20px 0', color: '#ffffff' }}>
+              Recent Opportunities
+            </h3>
+            
+            {monitoringStats.recentOpportunities && monitoringStats.recentOpportunities.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {monitoringStats.recentOpportunities.map((opp, index) => (
+                  <div key={index} style={{ 
+                    padding: '12px',
+                    backgroundColor: '#0D1421',
+                    borderRadius: '8px',
+                    border: '1px solid #2D3748'
+                  }}>
+                    <div style={{ 
+                      display: 'flex', 
+                      justifyContent: 'space-between', 
+                      alignItems: 'flex-start',
+                      marginBottom: '6px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <History size={14} style={{ color: '#8B5CF6' }} />
+                        <span style={{ color: '#ffffff', fontSize: '14px', fontWeight: '500' }}>
+                          {opp.pair}
+                        </span>
+                      </div>
+                      <span style={{ color: '#6B7280', fontSize: '12px' }}>
+                        {opp.time}
+                      </span>
+                    </div>
+                    <div style={{ 
+                      fontSize: '12px', 
+                      color: '#9CA3AF',
+                      marginBottom: '4px'
+                    }}>
+                      {opp.buyDex} → {opp.sellDex}
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ 
+                        color: '#00D4AA', 
+                        fontSize: '12px',
+                        fontWeight: '600'
+                      }}>
+                        ${opp.profitUsd.toFixed(2)}
+                      </span>
+                      <span style={{ 
+                        color: '#00D4AA', 
+                        fontSize: '12px',
+                        fontWeight: '600'
+                      }}>
+                        {opp.profitPct.toFixed(2)}%
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ 
+                textAlign: 'center', 
+                padding: '20px',
+                color: '#9CA3AF'
+              }}>
+                <History size={32} style={{ margin: '0 auto 8px', opacity: 0.5 }} />
+                <p style={{ margin: 0, fontSize: '14px' }}>No recent opportunities</p>
+              </div>
+            )}
           </div>
         </div>
       </div>

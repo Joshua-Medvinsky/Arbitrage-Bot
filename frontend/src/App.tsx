@@ -55,8 +55,24 @@ export interface MonitoringStats {
     sellDex: string
     profitUsd: number
     profitPct: number
-    time: number
+    time: string
   }
+  topDexRoutes?: Array<{
+    route: string
+    count: number
+  }>
+  topPairs?: Array<{
+    pair: string
+    count: number
+  }>
+  recentOpportunities?: Array<{
+    time: string
+    pair: string
+    buyDex: string
+    sellDex: string
+    profitUsd: number
+    profitPct: number
+  }>
 }
 
 export interface Portfolio {

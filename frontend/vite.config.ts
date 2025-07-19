@@ -8,6 +8,10 @@ export default defineConfig({
     port: 3000,
     host: '0.0.0.0', // Allow external connections for mobile development
     hmr: false, // Disable hot module replacement
+    // strictPort: false, // Allow Vite to automatically try other ports if 3000 is busy
+    watch: {
+      ignored: ['**/src-tauri/**'] // Ignore Tauri files to prevent unnecessary rebuilds
+    },
     proxy: {
       '/api': {
         target: 'http://localhost:8000',
