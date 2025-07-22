@@ -28,7 +28,7 @@ PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 SEARCHER_ADDRESS = Account.from_key(PRIVATE_KEY).address
 CONTRACT_ADDRESS = "0xYourFlashLoanArbContract"
 CONTRACT_ABI = ...  # Load your contract ABI here
-WETH_ADDRESS = "0xYourWETHAddress"
+WETH_ADDRESS = "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1"
 PERCENTAGE_TO_KEEP = 9000  # Example: 90% (in basis points)
 GAS_LIMIT = 400_000
 
