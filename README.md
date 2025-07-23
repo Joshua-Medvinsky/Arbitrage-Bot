@@ -4,6 +4,8 @@
 
 A sophisticated arbitrage bot designed for the Base network that monitors Uniswap V3, SushiSwap, Aerodrome, and Balancer V2 DEXes for profitable trading opportunities. The bot features comprehensive safety checks, real-time execution capabilities, and fallback mechanisms for token handling.
 
+<img width="1918" height="1078" alt="image" src="https://github.com/user-attachments/assets/c497562b-9e07-4770-a7c9-4deb99b48713" />
+
 ## Features
 
 ### 🔍 **Multi-DEX Monitoring**
