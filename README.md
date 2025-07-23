@@ -184,6 +184,7 @@ The bot handles token accessibility issues:
 - **Real Execution**: Can execute actual trades (with safety limits)
 
 ### 🚧 **Future Enhancements**
+- [ ] Backrun Mode (WIP): We're currently working on an experimental Backrun Mode, which monitors pending transactions (via MEV-Share) and attempts to sandwich them by executing profitable trades after the target transaction. This feature is still under active development and not production-ready yet.
 - [ ] Additional DEX support (PancakeSwap, etc.)
 - [ ] Advanced MEV protection strategies
 - [ ] Automated position sizing based on liquidity
