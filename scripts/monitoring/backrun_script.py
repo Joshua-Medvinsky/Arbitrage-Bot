@@ -35,7 +35,7 @@ CONTRACT_ABI = json.load(open(os.getenv("CONTRACT_ABI_PATH", "./flashloan_arb_co
 # Trade params
 WETH_ADDRESS = Web3.to_checksum_address(os.getenv("WETH_ADDRESS", "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1"))
 PERCENTAGE_TO_KEEP = int(os.getenv("PERCENTAGE_TO_KEEP", "9000"))  # basis points
-GAS_LIMIT = int(os.getenv("GAS_LIMIT", "400000"))
+GAS_LIMIT = int(os.getenv("GAS_LIMIT", "500000"))
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
