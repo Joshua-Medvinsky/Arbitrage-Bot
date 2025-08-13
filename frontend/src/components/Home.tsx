@@ -1,5 +1,5 @@
 import { ArbitrageOpportunity, BotStatus, Portfolio, LogEntry, MonitoringStats } from '../App'
-import { TrendingUp, Activity, DollarSign, Target, Shield, Play, Square, BarChart3, Clock, Users, ScrollText, AlertCircle, CheckCircle, Info, XCircle, Wifi, ArrowRightLeft, Coins, History } from 'lucide-react'
+import { TrendingUp, Activity, Target, Shield, Play, Square, BarChart3, Clock, Users, ScrollText, AlertCircle, CheckCircle, Info, XCircle, Wifi, ArrowRightLeft, Coins, History } from 'lucide-react'
 
 interface HomeProps {
   opportunities: ArbitrageOpportunity[]
@@ -68,9 +68,6 @@ const Home = ({
     fontSize: '14px',
     transition: 'all 0.2s ease'
   }
-
-  const successRate = monitoringStats.totalOpportunitiesFound > 0 ? 
-    Math.round((monitoringStats.opportunitiesExecuted / monitoringStats.totalOpportunitiesFound) * 100) : 0
 
   return (
     <div style={{ padding: '0 8px' }}>
